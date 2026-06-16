@@ -35,9 +35,10 @@ jobs:
         shell: bash
         run: |
           git init .
-          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          git -c http.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch --depth=1 origin "${GITHUB_SHA}"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "${GITHUB_SHA}"
           git checkout --force FETCH_HEAD
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Show runtime versions
         shell: bash
@@ -92,8 +93,24 @@ jobs:
         if: always()
         shell: bash
         run: |
+          if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+            echo "No checked-out commit is available; skipping dry-run result publish."
+            exit 0
+          fi
+
+          if [ ! -f dry-run-results/latest.txt ]; then
+            mkdir -p dry-run-results
+            {
+              echo "Dry run timestamp UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+              echo "Trigger SHA: $GITHUB_SHA"
+              echo "Exit status: checkout-or-setup-failed"
+              echo
+              echo "Result: FAILURE - workflow did not create a dry-run result file before the commit step."
+            } > dry-run-results/latest.txt
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add dry-run-results/latest.txt
           git commit -m "Record dry-run login check result" || exit 0
-          git -c http.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" push origin HEAD:main
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
