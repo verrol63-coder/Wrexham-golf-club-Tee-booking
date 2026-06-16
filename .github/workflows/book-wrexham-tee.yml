@@ -21,6 +21,9 @@ on:
           - "false"
           - "true"
 
+permissions:
+  contents: read
+
 concurrency:
   group: wrexham-sunday-tee-booking
   cancel-in-progress: true
@@ -28,6 +31,7 @@ concurrency:
 jobs:
   book:
     runs-on: ubuntu-latest
+    environment: Wrexham-golf-club-Tee-booking
     timeout-minutes: 15
     env:
       TZ: Europe/London
@@ -48,27 +52,28 @@ jobs:
       IG_PIN: ${{ secrets.IG_PIN }}
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - name: Check out repository with built-in git
+        shell: bash
+        run: |
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -c http.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force FETCH_HEAD
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
+      - name: Show runtime versions
+        shell: bash
+        run: |
+          node --version
+          npm --version
 
       - name: Install dependencies
+        shell: bash
         run: npm install
 
       - name: Install Chromium
+        shell: bash
         run: npx playwright install --with-deps chromium
 
       - name: Book tee
+        shell: bash
         run: npm run book
-
-      - name: Upload run artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: booking-run-artifacts
-          path: artifacts/
-          if-no-files-found: ignore
