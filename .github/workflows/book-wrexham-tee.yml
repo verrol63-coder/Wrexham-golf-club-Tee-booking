@@ -2,10 +2,10 @@ name: Book Wrexham Sunday tee
 
 on:
   schedule:
-    # GitHub schedules use UTC. These two entries cover 18:58 Europe/London
+    # GitHub schedules use UTC. These two entries cover 18:50 Europe/London
     # during both BST and GMT; the script exits unless local time is in-window.
-    - cron: "58 17 * * 0"
-    - cron: "58 18 * * 0"
+    - cron: "50 17 * * 0"
+    - cron: "50 18 * * 0"
   workflow_dispatch:
     inputs:
       target_date:
@@ -39,6 +39,8 @@ jobs:
       COURSE_ID: "779"
       GROUP_ID: "1"
       REQUIRE_BOOKING_WINDOW: "true"
+      WAIT_FOR_LOGIN: "true"
+      LOGIN_AT: "18:59"
       WAIT_FOR_1900: "true"
       TARGET_DATE: ${{ inputs.target_date }}
       DRY_RUN: ${{ inputs.dry_run || 'false' }}
