@@ -6,6 +6,9 @@ on:
       - ".github/workflows/dry-run-now.yml"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   dry-run:
     runs-on: ubuntu-latest
@@ -43,7 +46,49 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run dry-run login and booking screen check
-        run: npm run book
+        shell: bash
+        run: |
+          set +e
+          mkdir -p artifacts dry-run-results
+          npm run book > artifacts/run.log 2>&1
+          status=$?
+
+          {
+            echo "Dry run timestamp UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "Trigger SHA: $GITHUB_SHA"
+            echo "Exit status: $status"
+            echo
+            if grep -q "Dry run reached the booking screen" artifacts/run.log; then
+              echo "Result: SUCCESS - login worked and the booking screen was reached. No final booking was submitted."
+            elif grep -q "Missing IG_MEMBER_ID secret" artifacts/run.log; then
+              echo "Result: FAILURE - IG_MEMBER_ID is still missing or unavailable to this environment."
+            elif grep -q "Missing IG_PIN secret" artifacts/run.log; then
+              echo "Result: FAILURE - IG_PIN is still missing or unavailable to this environment."
+            elif grep -q "Member login did not succeed" artifacts/run.log; then
+              echo "Result: FAILURE - credentials were supplied but member login did not succeed."
+            elif grep -q "visitor tee-time login" artifacts/run.log; then
+              echo "Result: FAILURE - site showed the visitor tee-time login instead of the member booking flow."
+            elif grep -q "CAPTCHA\|security check" artifacts/run.log; then
+              echo "Result: FAILURE - a CAPTCHA or security check appeared."
+            else
+              echo "Result: FAILURE - dry run did not reach the booking screen. See sanitized log excerpt below."
+            fi
+            echo
+            echo "Sanitized log excerpt:"
+            sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[email-redacted]/g; s/[0-9]{5,}/[number-redacted]/g' artifacts/run.log | tail -80
+          } > dry-run-results/latest.txt
+
+          exit 0
+
+      - name: Commit dry-run result
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dry-run-results/latest.txt
+          git commit -m "Record dry-run login check result" || exit 0
+          git push
 
       - name: Upload dry-run artifacts
         if: always()
