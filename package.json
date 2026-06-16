@@ -1,0 +1,13 @@
+{
+  "name": "wrexham-golf-club-tee-booking",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "book": "node scripts/book-tee.mjs",
+    "check": "node --check scripts/book-tee.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.54.0"
+  }
+}
