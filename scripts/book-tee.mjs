@@ -20,6 +20,8 @@ const config = {
   groupId: env("GROUP_ID", "1"),
   dryRun: flag("DRY_RUN"),
   requireBookingWindow: flag("REQUIRE_BOOKING_WINDOW", true),
+  waitForLogin: flag("WAIT_FOR_LOGIN", true),
+  loginAt: env("LOGIN_AT", "18:59"),
   waitFor1900: flag("WAIT_FOR_1900", true),
   targetDate: env("TARGET_DATE", ""),
 };
@@ -57,12 +59,16 @@ async function main() {
   const page = await context.newPage();
 
   try {
+    if (config.waitForLogin) {
+      await waitUntilLocalClock(config.loginAt, "login");
+    }
+
     await loginAsMember(page);
     await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
     await dismissCookieBanner(page);
 
     if (config.waitFor1900) {
-      await waitUntilBookingOpens();
+      await waitUntilLocalClock("19:00", "booking window");
     }
 
     for (const time of candidateTimes) {
@@ -265,19 +271,20 @@ async function dismissCookieBanner(page) {
   }
 }
 
-async function waitUntilBookingOpens() {
+async function waitUntilLocalClock(hhmm, label) {
+  const target = parseClock(hhmm);
   const start = Date.now();
-  while (Date.now() - start < 7 * 60 * 1000) {
+  while (Date.now() - start < 15 * 60 * 1000) {
     const now = londonNow();
     const minutes = now.hour * 60 + now.minute;
-    if (minutes >= 19 * 60) {
-      console.log(`Booking window is open in ${TIME_ZONE}: ${two(now.hour)}:${two(now.minute)}:${two(now.second)}.`);
+    if (minutes >= target.minutes) {
+      console.log(`${label} time reached in ${TIME_ZONE}: ${two(now.hour)}:${two(now.minute)}:${two(now.second)}.`);
       return;
     }
     await sleep(250);
   }
 
-  throw new Error("Waited for 19:00 Europe/London, but it did not arrive inside the maximum wait window.");
+  throw new Error(`Waited for ${hhmm} Europe/London, but it did not arrive inside the maximum wait window.`);
 }
 
 function validateConfig() {
@@ -311,7 +318,7 @@ function addDaysIso(parts, days) {
 function isInBookingWindow(parts) {
   if (parts.weekdayIndex !== 0) return false;
   const minutes = parts.hour * 60 + parts.minute;
-  return minutes >= 18 * 60 + 55 && minutes <= 19 * 60 + 5;
+  return minutes >= 18 * 60 + 45 && minutes <= 19 * 60 + 5;
 }
 
 function londonNow() {
@@ -355,6 +362,16 @@ function normalizeTime(value) {
   const match = String(value || "").match(/^(\d{1,2}):?(\d{2})$/);
   if (!match) return "";
   return `${two(Number(match[1]))}:${match[2]}`;
+}
+
+function parseClock(value) {
+  const match = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) throw new Error(`Invalid clock time: ${value}`);
+  return {
+    hour: Number(match[1]),
+    minute: Number(match[2]),
+    minutes: Number(match[1]) * 60 + Number(match[2]),
+  };
 }
 
 async function hasText(page, pattern) {
