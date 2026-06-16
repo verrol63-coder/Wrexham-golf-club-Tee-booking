@@ -5,7 +5,7 @@ This repository contains a scheduled cloud automation for booking the weekly Wre
 ## Booking rule
 
 - Runs on Sunday evening and targets the following Sunday, 7 days ahead.
-- Logs in before booking opens and waits for 19:00 Europe/London.
+- Starts early, waits to log in at 18:59 Europe/London, then waits for 19:00 before booking.
 - Tries `07:50` first.
 - Tries `08:30` second if the first time is unavailable.
 - Books 4 players: Verrol Skerritt, Richard Roberts, Dean Holmes, Eddie Buckly.
@@ -28,4 +28,4 @@ For a safe test, choose `dry_run=true`. The workflow will log in and try to reac
 
 ## Notes
 
-GitHub Actions schedules are not guaranteed to start at the exact second. The workflow is scheduled at the London-time equivalent of 18:58 in both BST and GMT, then the script waits until 19:00 before attempting to submit. This is cloud-independent from a MacBook, but no hosted scheduler can guarantee being first if GitHub starts the job late or the golf site is slow.
+GitHub Actions schedules are not guaranteed to start at the exact second. The workflow is scheduled at the London-time equivalent of 18:50 in both BST and GMT, then the script waits until 18:59 to log in and 19:00 before attempting to submit. This is cloud-independent from a MacBook, but no hosted scheduler can guarantee being first if GitHub starts the job late or the golf site is slow.
