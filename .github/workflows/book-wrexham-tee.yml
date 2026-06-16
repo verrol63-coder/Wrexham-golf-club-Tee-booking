@@ -1,0 +1,73 @@
+name: Book Wrexham Sunday tee
+
+on:
+  schedule:
+    # GitHub schedules use UTC. These two entries cover 18:58 Europe/London
+    # during both BST and GMT; the script exits unless local time is in-window.
+    - cron: "58 17 * * 0"
+    - cron: "58 18 * * 0"
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "Optional target date, YYYY-MM-DD. Blank means the Sunday 7 days ahead for scheduled Sunday runs."
+        required: false
+        type: string
+      dry_run:
+        description: "Run without submitting the final booking"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+concurrency:
+  group: wrexham-sunday-tee-booking
+  cancel-in-progress: true
+
+jobs:
+  book:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Europe/London
+      BOOKING_URL: https://www.wrexhamgolfclub.co.uk/memberbooking/
+      LOGIN_URL: https://www.wrexhamgolfclub.co.uk/login.php
+      PRIMARY_TEE_TIME: "07:50"
+      SECONDARY_TEE_TIME: "08:30"
+      PLAYER_NAMES: "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckly"
+      COURSE_ID: "779"
+      GROUP_ID: "1"
+      REQUIRE_BOOKING_WINDOW: "true"
+      WAIT_FOR_1900: "true"
+      TARGET_DATE: ${{ inputs.target_date }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+      IG_MEMBER_ID: ${{ secrets.IG_MEMBER_ID }}
+      IG_PIN: ${{ secrets.IG_PIN }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Book tee
+        run: npm run book
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: booking-run-artifacts
+          path: artifacts/
+          if-no-files-found: ignore
