@@ -31,18 +31,26 @@ jobs:
       IG_PIN: ${{ secrets.IG_PIN }}
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - name: Check out repository with built-in git
+        shell: bash
+        run: |
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -c http.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force FETCH_HEAD
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
+      - name: Show runtime versions
+        shell: bash
+        run: |
+          node --version
+          npm --version
 
       - name: Install dependencies
+        shell: bash
         run: npm install
 
       - name: Install Chromium
+        shell: bash
         run: npx playwright install --with-deps chromium
 
       - name: Run dry-run login and booking screen check
@@ -88,12 +96,4 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add dry-run-results/latest.txt
           git commit -m "Record dry-run login check result" || exit 0
-          git push
-
-      - name: Upload dry-run artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dry-run-artifacts
-          path: artifacts/
-          if-no-files-found: ignore
+          git -c http.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" push origin HEAD:main
