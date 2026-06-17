@@ -61,6 +61,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
 
       - name: Show runtime versions
         shell: bash
@@ -70,7 +71,7 @@ jobs:
 
       - name: Install dependencies
         shell: bash
-        run: npm install
+        run: npm ci
 
       - name: Install Chromium
         shell: bash
