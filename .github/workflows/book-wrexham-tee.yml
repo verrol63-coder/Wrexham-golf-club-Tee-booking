@@ -32,7 +32,7 @@ jobs:
   book:
     runs-on: ubuntu-latest
     environment: Wrexham-golf-club-Tee-booking
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       TZ: Europe/London
       BOOKING_URL: https://www.wrexhamgolfclub.co.uk/memberbooking/
@@ -52,14 +52,15 @@ jobs:
       IG_PIN: ${{ secrets.IG_PIN }}
 
     steps:
-      - name: Check out repository with built-in git
-        shell: bash
-        run: |
-          git init .
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git fetch --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force FETCH_HEAD
-          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Show runtime versions
         shell: bash
@@ -78,3 +79,11 @@ jobs:
       - name: Book tee
         shell: bash
         run: npm run book
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: booking-run-artifacts
+          path: artifacts/
+          if-no-files-found: ignore
