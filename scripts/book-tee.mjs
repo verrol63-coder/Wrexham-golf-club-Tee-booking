@@ -116,6 +116,9 @@ async function loginAsMember(page) {
   if (/invalid|incorrect|try again|login required/i.test(body) && (await memberField.isVisible().catch(() => false))) {
     throw new Error("Member login did not succeed. Check IG_MEMBER_ID and IG_PIN secrets.");
   }
+  if (await isRegistrationPage(page, body)) {
+    throw new Error("Member login did not reach the booking area; the site showed a registration page. Check IG_MEMBER_ID and IG_PIN secrets.");
+  }
 }
 
 async function attemptTime(page, gridUrl, time) {
@@ -171,6 +174,10 @@ async function guardAgainstUnexpectedScreens(page, time) {
 
   if (await page.locator("#teeemail, #teepassword").first().isVisible().catch(() => false)) {
     throw new Error("The site showed the visitor tee-time login instead of the member booking flow.");
+  }
+
+  if (await isRegistrationPage(page, body)) {
+    throw new Error(`The site showed a registration page instead of the member booking form for ${time}. The login/session may not be valid.`);
   }
 
   if (/captcha|security check|verify you are human/i.test(body)) {
@@ -380,6 +387,16 @@ async function hasText(page, pattern) {
 
 async function bodyText(page) {
   return page.locator("body").innerText({ timeout: 5000 }).catch(() => "");
+}
+
+async function isRegistrationPage(page, body = "") {
+  const hasRegisterText = /\bregister\b/i.test(body) && /already have an account|log in|repeat password/i.test(body);
+  const hasRegisterFields = await page
+    .locator('input[name*="forename" i], input[name*="surname" i], input[name*="repeat" i], input[name*="password" i]')
+    .count()
+    .then((count) => count >= 2)
+    .catch(() => false);
+  return hasRegisterText || hasRegisterFields;
 }
 
 async function saveFailureArtifacts(page, error) {
