@@ -20,6 +20,8 @@ const config = {
   groupId: env("GROUP_ID", "1"),
   dryRun: flag("DRY_RUN"),
   requireBookingWindow: flag("REQUIRE_BOOKING_WINDOW", true),
+  bookingWeekdays: parseWeekdays(env("BOOKING_WEEKDAYS", "Sun")),
+  targetDaysAhead: parseOptionalInteger(env("TARGET_DAYS_AHEAD", "")),
   waitForLogin: flag("WAIT_FOR_LOGIN", true),
   loginAt: env("LOGIN_AT", "18:59"),
   waitFor1900: flag("WAIT_FOR_1900", true),
@@ -42,7 +44,7 @@ async function main() {
     return;
   }
 
-  const targetDateIso = config.targetDate || defaultTargetDateIso();
+  const targetDateIso = config.targetDate || defaultTargetDateIso(now);
   const targetDateParam = isoToDdMmYyyy(targetDateIso);
   const gridUrl = buildBookingUrl(targetDateParam);
 
@@ -309,11 +311,14 @@ function buildBookingUrl(dateParam) {
   return url.toString();
 }
 
-function defaultTargetDateIso() {
-  const today = londonNow();
-  const daysUntilSunday = (7 - today.weekdayIndex) % 7;
+function defaultTargetDateIso(parts = londonNow()) {
+  if (config.targetDaysAhead !== null) {
+    return addDaysIso(parts, config.targetDaysAhead);
+  }
+
+  const daysUntilSunday = (7 - parts.weekdayIndex) % 7;
   const daysToAdd = daysUntilSunday === 0 ? 7 : daysUntilSunday;
-  return addDaysIso(today, daysToAdd);
+  return addDaysIso(parts, daysToAdd);
 }
 
 function addDaysIso(parts, days) {
@@ -323,7 +328,7 @@ function addDaysIso(parts, days) {
 }
 
 function isInBookingWindow(parts) {
-  if (parts.weekdayIndex !== 0) return false;
+  if (!config.bookingWeekdays.includes(parts.weekdayIndex)) return false;
   const minutes = parts.hour * 60 + parts.minute;
   return minutes >= 18 * 60 + 45 && minutes <= 19 * 60 + 5;
 }
@@ -379,6 +384,30 @@ function parseClock(value) {
     minute: Number(match[2]),
     minutes: Number(match[1]) * 60 + Number(match[2]),
   };
+}
+
+function parseWeekdays(value) {
+  const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const indexes = String(value || "")
+    .split(/[|, ]+/)
+    .map((day) => day.trim())
+    .filter(Boolean)
+    .map((day) => names.findIndex((name) => name.toLowerCase() === day.slice(0, 3).toLowerCase()));
+
+  if (indexes.length === 0 || indexes.some((index) => index === -1)) {
+    throw new Error(`Invalid BOOKING_WEEKDAYS: ${value}`);
+  }
+
+  return indexes;
+}
+
+function parseOptionalInteger(value) {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) {
+    throw new Error(`Invalid TARGET_DAYS_AHEAD: ${value}`);
+  }
+  return number;
 }
 
 async function hasText(page, pattern) {

@@ -1,15 +1,15 @@
-name: Book Wrexham Sunday tee
+name: Book Wrexham Thursday 07:30 tee
 
 on:
   schedule:
     # GitHub schedules use UTC. These two entries cover 18:50 Europe/London
     # during both BST and GMT; the script exits unless local time is in-window.
-    - cron: "50 17 * * 0"
-    - cron: "50 18 * * 0"
+    - cron: "50 17 * * 4"
+    - cron: "50 18 * * 4"
   workflow_dispatch:
     inputs:
       target_date:
-        description: "Optional target date, YYYY-MM-DD. Blank means the Sunday 7 days ahead for scheduled Sunday runs."
+        description: "Optional target date, YYYY-MM-DD. Blank means 7 days ahead for scheduled runs."
         required: false
         type: string
       dry_run:
@@ -25,7 +25,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: wrexham-sunday-tee-booking
+  group: wrexham-thursday-0730-tee-booking
   cancel-in-progress: true
 
 jobs:
@@ -36,13 +36,13 @@ jobs:
       TZ: Europe/London
       BOOKING_URL: https://www.wrexhamgolfclub.co.uk/memberbooking/
       LOGIN_URL: https://www.wrexhamgolfclub.co.uk/login.php
-      PRIMARY_TEE_TIME: "07:50"
-      SECONDARY_TEE_TIME: "08:30"
-      PLAYER_NAMES: "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckly"
+      PRIMARY_TEE_TIME: "07:30"
+      SECONDARY_TEE_TIME: ""
+      PLAYER_NAMES: "Verrol Skerritt"
       COURSE_ID: "779"
       GROUP_ID: "1"
       REQUIRE_BOOKING_WINDOW: "true"
-      BOOKING_WEEKDAYS: "Sun"
+      BOOKING_WEEKDAYS: "Thu"
       TARGET_DAYS_AHEAD: "7"
       WAIT_FOR_LOGIN: "true"
       LOGIN_AT: "18:59"
