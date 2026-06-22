@@ -31,7 +31,6 @@ concurrency:
 jobs:
   book:
     runs-on: ubuntu-latest
-    environment: Wrexham-golf-club-Tee-booking
     timeout-minutes: 30
     env:
       TZ: Europe/London
