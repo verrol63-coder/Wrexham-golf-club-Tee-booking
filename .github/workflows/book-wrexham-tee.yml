@@ -46,8 +46,8 @@ jobs:
       WAIT_FOR_LOGIN: "true"
       LOGIN_AT: "18:59"
       WAIT_FOR_1900: "true"
-      TARGET_DATE: ${{ inputs.target_date }}
-      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+      TARGET_DATE: ${{ github.event.inputs.target_date || '' }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
       IG_MEMBER_ID: ${{ secrets.IG_MEMBER_ID }}
       IG_PIN: ${{ secrets.IG_PIN }}
 
