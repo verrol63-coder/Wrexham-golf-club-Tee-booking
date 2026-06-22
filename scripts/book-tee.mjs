@@ -283,7 +283,7 @@ async function dismissCookieBanner(page) {
 async function waitUntilLocalClock(hhmm, label) {
   const target = parseClock(hhmm);
   const start = Date.now();
-  while (Date.now() - start < 15 * 60 * 1000) {
+  while (Date.now() - start < 40 * 60 * 1000) {
     const now = londonNow();
     const minutes = now.hour * 60 + now.minute;
     if (minutes >= target.minutes) {
@@ -330,7 +330,7 @@ function addDaysIso(parts, days) {
 function isInBookingWindow(parts) {
   if (!config.bookingWeekdays.includes(parts.weekdayIndex)) return false;
   const minutes = parts.hour * 60 + parts.minute;
-  return minutes >= 18 * 60 + 45 && minutes <= 19 * 60 + 5;
+  return minutes >= 18 * 60 + 30 && minutes <= 19 * 60 + 5;
 }
 
 function londonNow() {

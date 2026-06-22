@@ -2,10 +2,10 @@ name: Book Wrexham Thursday 07:30 tee
 
 on:
   schedule:
-    # GitHub schedules use UTC. These two entries cover 18:50 Europe/London
+    # GitHub schedules use UTC. These two entries cover 18:35 Europe/London
     # during both BST and GMT; the script exits unless local time is in-window.
-    - cron: "50 17 * * 4"
-    - cron: "50 18 * * 4"
+    - cron: "35 17 * * 4"
+    - cron: "35 18 * * 4"
   workflow_dispatch:
     inputs:
       target_date:

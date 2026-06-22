@@ -34,4 +34,4 @@ For a safe test, choose `dry_run=true`. The workflow will log in and try to reac
 
 ## Notes
 
-GitHub Actions schedules are not guaranteed to start at the exact second. Each workflow is scheduled at the London-time equivalent of 18:50 in both BST and GMT, then the script waits until 18:59 to log in and 19:00 before attempting to submit. This is cloud-independent from a MacBook, but no hosted scheduler can guarantee being first if GitHub starts the job late or the golf site is slow.
+GitHub Actions schedules are not guaranteed to start at the exact second. Each workflow is scheduled at the London-time equivalent of 18:35 in both BST and GMT, then the script waits until 18:59 to log in and 19:00 before attempting to submit immediately when booking opens. This is cloud-independent from a MacBook, but no hosted scheduler can guarantee being first if GitHub starts the job late or the golf site is slow.
