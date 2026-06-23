@@ -275,20 +275,38 @@ async function fillPlayerNames(page, players) {
 }
 
 async function clickFinalBookingButton(page) {
-  const labels = [/confirm/i, /book/i, /reserve/i, /submit/i, /finish/i, /save/i];
-  const blockers = /back|cancel|login|register|reset|search|change/i;
+  const labels = [
+    /confirm/i,
+    /confirm booking/i,
+    /book/i,
+    /book now/i,
+    /book tee/i,
+    /book time/i,
+    /make booking/i,
+    /reserve/i,
+    /submit/i,
+    /finish/i,
+    /complete/i,
+    /continue/i,
+    /save/i,
+  ];
+  const blockers = /back|cancel|login|logout|register|reset|search|change|home|news|information|competition|diary|cookie/i;
+  const candidates = await page.locator("button, input[type='submit'], input[type='button'], a").all();
 
-  for (const label of labels) {
-    const buttons = await page.locator("button, input[type='submit'], a.btn").all();
-    for (const button of buttons) {
-      const text = `${await button.innerText().catch(() => "")} ${await button.getAttribute("value").catch(() => "")}`.trim();
-      if (!label.test(text) || blockers.test(text)) continue;
-      if (!(await button.isVisible().catch(() => false))) continue;
-      await button.click();
-      return true;
-    }
+  for (const candidate of candidates) {
+    if (!(await candidate.isVisible().catch(() => false))) continue;
+    const text = `${await candidate.innerText().catch(() => "")} ${await candidate.getAttribute("value").catch(() => "")} ${await candidate.getAttribute("title").catch(() => "")}`.trim();
+    const href = `${await candidate.getAttribute("href").catch(() => "")}`;
+    if (!text && !href) continue;
+    if (blockers.test(text) || blockers.test(href)) continue;
+    if (!labels.some((label) => label.test(text) || label.test(href))) continue;
+
+    console.log(`Clicking final booking candidate: ${text || href}`);
+    await candidate.click();
+    return true;
   }
 
+  await savePageDiagnostics(page, "no-final-booking-button").catch(() => {});
   return false;
 }
 
@@ -452,7 +470,33 @@ async function isRegistrationPage(page, body = "") {
 
 async function saveFailureArtifacts(page, error) {
   await saveScreenshot(page, "failure.png").catch(() => {});
-  await fs.writeFile(path.join(ARTIFACT_DIR, "failure.txt"), `${error.stack || error.message}\n`, "utf8").catch(() => {});
+  await savePageDiagnostics(page, "failure").catch(() => {});
+  await fs.writeFile(path.join(ARTIFACT_DIR, "failure.txt"), `${error.stack || error.message}
+`, "utf8").catch(() => {});
+}
+
+async function savePageDiagnostics(page, label) {
+  const diagnostics = await page.evaluate(() => ({
+    url: window.location.href,
+    title: document.title,
+    bodyText: document.body?.innerText?.slice(0, 5000) || "",
+    controls: Array.from(document.querySelectorAll("button, input, a"))
+      .filter((element) => {
+        const style = window.getComputedStyle(element);
+        return style && style.display !== "none" && style.visibility !== "hidden";
+      })
+      .slice(0, 100)
+      .map((element) => ({
+        tag: element.tagName.toLowerCase(),
+        type: element.getAttribute("type") || "",
+        text: element.innerText || element.getAttribute("value") || element.getAttribute("aria-label") || element.getAttribute("title") || "",
+        href: element.getAttribute("href") || "",
+        name: element.getAttribute("name") || "",
+        id: element.getAttribute("id") || "",
+        className: element.getAttribute("class") || "",
+      })),
+  }));
+  await fs.writeFile(path.join(ARTIFACT_DIR, `${label}-page.json`), JSON.stringify(diagnostics, null, 2), "utf8");
 }
 
 async function saveScreenshot(page, filename) {
