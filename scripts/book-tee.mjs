@@ -138,6 +138,17 @@ async function attemptTime(page, gridUrl, time) {
   }
 
   await fillBookingForm(page);
+
+  const afterFillText = await bodyText(page);
+  if (/confirmed|booked|booking reference|success|thank you/i.test(afterFillText)) {
+    console.log(`Booking appears confirmed for ${time} on ${config.targetDate || defaultTargetDateIso()}.`);
+    await saveScreenshot(page, `submitted-${time.replace(":", "")}.png`);
+    return "booked";
+  }
+  if (/payment|card number|checkout|pay now/i.test(afterFillText)) {
+    throw new Error("A payment screen appeared, but this member booking should require no payment. Stopping.");
+  }
+
   await saveScreenshot(page, `ready-${time.replace(":", "")}.png`);
 
   if (config.dryRun) {
@@ -201,6 +212,17 @@ async function fillBookingForm(page) {
 }
 
 async function setPlayerCount(page, count) {
+  const playerLabel = `${count} ${count === 1 ? "Player" : "Players"}`;
+  const playerCountLink = page.getByRole("link", { name: playerLabel });
+  if (await playerCountLink.isVisible({ timeout: 1000 }).catch(() => false)) {
+    console.log(`Selecting ${playerLabel}.`);
+    await Promise.all([
+      page.waitForLoadState("domcontentloaded").catch(() => {}),
+      playerCountLink.click(),
+    ]);
+    return;
+  }
+
   const selects = await page.locator("select").all();
   for (const select of selects) {
     const name = `${await select.getAttribute("name").catch(() => "")} ${await select.getAttribute("id").catch(() => "")}`.toLowerCase();
