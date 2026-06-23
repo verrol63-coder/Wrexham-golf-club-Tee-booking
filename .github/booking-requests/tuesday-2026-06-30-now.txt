@@ -1,1 +1,1 @@
-Retry one-off real booking attempt after player-count flow fix for Verrol Skerritt, Tuesday 2026-06-30, 07:30. Requested 2026-06-23 after failed run 28049986628.
+Retry one-off real booking attempt after broader final button detection for Verrol Skerritt, Tuesday 2026-06-30, 07:30.
