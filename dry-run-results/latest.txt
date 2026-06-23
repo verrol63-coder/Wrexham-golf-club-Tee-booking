@@ -1,0 +1,18 @@
+Dry run timestamp UTC: 2026-06-23T20:01:49Z
+Trigger SHA: 216bd49f512785628719d2dc5019ea64da281bf6
+Exit status: 0
+
+Result: SUCCESS - login worked and the booking screen was reached. No final booking was submitted.
+
+Sanitized log excerpt:
+
+> [email-redacted] book
+> node scripts/book-tee.mjs
+
+Target date: 2026-06-28
+Preferred times: 07:50, 08:30
+Players: Verrol Skerritt, Richard Roberts, Dean Holmes, Eddie Buckly
+DRY_RUN=true: final submit will not be clicked.
+Trying 07:50 via https://www.wrexhamgolfclub.co.uk/memberbooking/?date=28-06-2026&course=779&group=1&book=07%3A50%3A00
+Only found 0 partner/player fields for 3 additional players. The booking page may use a custom member picker.
+Dry run reached the booking screen for 07:50. No final submit clicked.
