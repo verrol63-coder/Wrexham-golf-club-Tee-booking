@@ -20,6 +20,14 @@ on:
         options:
           - "false"
           - "true"
+      require_booking_window:
+        description: "Require Tuesday 18:30-19:05 booking window"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
 
 permissions:
   contents: read
@@ -41,7 +49,7 @@ jobs:
       PLAYER_NAMES: "Verrol Skerritt"
       COURSE_ID: "779"
       GROUP_ID: "1"
-      REQUIRE_BOOKING_WINDOW: "true"
+      REQUIRE_BOOKING_WINDOW: ${{ github.event.inputs.require_booking_window || 'true' }}
       BOOKING_WEEKDAYS: "Tue"
       TARGET_DAYS_AHEAD: "7"
       WAIT_FOR_LOGIN: "true"
