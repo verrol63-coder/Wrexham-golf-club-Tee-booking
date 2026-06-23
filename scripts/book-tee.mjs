@@ -69,8 +69,19 @@ async function main() {
     await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
     await dismissCookieBanner(page);
 
+    // DIAGNOSTIC: capture what the tee sheet grid actually looks like before release.
+    // This is needed to learn the real markup/link format the site uses for a bookable
+    // slot, instead of guessing a "&book=HH:MM:00" URL pattern. Safe no-op otherwise.
+    await captureGridDiagnostics(page, "grid-before-release");
+
     if (config.waitFor1900) {
       await waitUntilLocalClock("19:00", "booking window");
+
+      // Re-load the grid fresh right after release, since slots may only render as
+      // live, clickable links once the booking window actually opens.
+      await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+      await dismissCookieBanner(page);
+      await captureGridDiagnostics(page, "grid-after-release");
     }
 
     for (const time of candidateTimes) {
@@ -473,6 +484,11 @@ async function saveFailureArtifacts(page, error) {
   await savePageDiagnostics(page, "failure").catch(() => {});
   await fs.writeFile(path.join(ARTIFACT_DIR, "failure.txt"), `${error.stack || error.message}
 `, "utf8").catch(() => {});
+}
+
+async function captureGridDiagnostics(page, label) {
+  await saveScreenshot(page, `${label}.png`).catch(() => {});
+  await savePageDiagnostics(page, label).catch(() => {});
 }
 
 async function savePageDiagnostics(page, label) {
