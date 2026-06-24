@@ -1,5 +1,5 @@
-Dry run timestamp UTC: 2026-06-24T07:19:38Z
-Trigger SHA: 65ca886e226ef0cc3e761ad8ef8e09372f19298b
+Dry run timestamp UTC: 2026-06-24T07:23:46Z
+Trigger SHA: d2843067c22bb11376533cf0a55314520c9b7570
 Exit status: 0
 
 Result: FAILURE - dry run did not reach the booking screen. See sanitized log excerpt below.
