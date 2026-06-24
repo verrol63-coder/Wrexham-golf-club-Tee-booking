@@ -30,6 +30,7 @@ jobs:
       WAIT_FOR_LOGIN: "false"
       WAIT_FOR_1900: "false"
       TARGET_DATE: "2026-06-24"
+      BOOKING_EDIT_ID: "4977750"
       DRY_RUN: "false"
       IG_MEMBER_ID: ${{ secrets.IG_MEMBER_ID }}
       IG_PIN: ${{ secrets.IG_PIN }}

@@ -26,6 +26,7 @@ const config = {
   loginAt: env("LOGIN_AT", "18:59"),
   waitFor1900: flag("WAIT_FOR_1900", true),
   targetDate: env("TARGET_DATE", ""),
+  bookingEditId: env("BOOKING_EDIT_ID", ""),
 };
 
 const candidateTimes = [config.primaryTime, config.secondaryTime].filter(Boolean);
@@ -66,6 +67,30 @@ async function main() {
     }
 
     await loginAsMember(page);
+
+    if (config.bookingEditId) {
+      const editUrl = buildEditBookingUrl(config.bookingEditId);
+      console.log(`Completing partner details for existing booking ${config.bookingEditId}.`);
+      await page.goto(editUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await dismissCookieBanner(page);
+      if (await acceptCodeOfConductIfPresent(page)) {
+        await page.goto(editUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+        await dismissCookieBanner(page);
+      }
+
+      await completePartnerDetails(page, config.primaryTime || "booking", config.players);
+      await saveScreenshot(page, `partners-complete-${(config.primaryTime || "booking").replace(":", "")}.png`);
+
+      const completedText = await confirmationCheckText(page);
+      if (isPartnerDetailsComplete(completedText, config.players)) {
+        console.log(`Partner details appear complete for existing booking ${config.bookingEditId}.`);
+        return;
+      }
+
+      await savePageDiagnostics(page, "existing-booking-partners-incomplete").catch(() => {});
+      throw new Error(`Entered partner details for existing booking ${config.bookingEditId}, but the page still did not look complete.`);
+    }
+
     await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
     await dismissCookieBanner(page);
 
@@ -431,6 +456,8 @@ async function findEnterDetailsLink(page, playerNumber) {
 }
 
 async function fillPartnerDetailPage(page, partnerName, playerNumber) {
+  await openAnotherMemberPicker(page);
+
   const input = await findPartnerInput(page);
   if (!input) {
     await savePageDiagnostics(page, `player-${playerNumber}-no-input`).catch(() => {});
@@ -477,22 +504,25 @@ async function findPartnerInput(page) {
   return fallback;
 }
 
+async function openAnotherMemberPicker(page) {
+  const anotherMember = page.getByRole("link", { name: /another member/i }).first();
+  if (!(await anotherMember.isVisible({ timeout: 1000 }).catch(() => false))) return;
+
+  await Promise.all([
+    page.waitForLoadState("domcontentloaded").catch(() => {}),
+    anotherMember.click(),
+  ]);
+  await dismissCookieBanner(page);
+  await sleep(500);
+}
+
 async function selectPartnerSuggestion(page, partnerName) {
   await sleep(750);
 
-  const exactSuggestion = page.getByText(new RegExp(`^\\s*${escapeRegex(partnerName)}\\s*$`, "i")).first();
-  if (await exactSuggestion.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await exactSuggestion.click().catch(() => {});
+  const exactSuggestion = await findPartnerResult(page, partnerName, "exact");
+  if (exactSuggestion) {
+    await exactSuggestion.click();
     return;
-  }
-
-  const surname = partnerName.trim().split(/\s+/).at(-1);
-  if (surname) {
-    const surnameSuggestion = page.getByText(new RegExp(`\\b${escapeRegex(surname)}\\b`, "i")).first();
-    if (await surnameSuggestion.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await surnameSuggestion.click().catch(() => {});
-      return;
-    }
   }
 
   const searchButton = await findActionButton(page, [/search/i, /find/i, /lookup/i], /cancel|back|delete|remove/i);
@@ -501,11 +531,32 @@ async function selectPartnerSuggestion(page, partnerName) {
     await page.waitForLoadState("domcontentloaded").catch(() => {});
     await sleep(750);
 
-    const result = page.getByText(new RegExp(`\\b${escapeRegex(surname || partnerName)}\\b`, "i")).first();
-    if (await result.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await result.click().catch(() => {});
+    const searchedExact = await findPartnerResult(page, partnerName, "exact");
+    if (searchedExact) {
+      await searchedExact.click();
+      return;
+    }
+
+    const searchedAllParts = await findPartnerResult(page, partnerName, "all-parts");
+    if (searchedAllParts) {
+      await searchedAllParts.click();
     }
   }
+}
+
+async function findPartnerResult(page, partnerName, mode) {
+  const links = await page.locator('a[href*="addpartner="]').all();
+  const target = normalizeHumanText(partnerName);
+  const targetParts = target.split(" ").filter(Boolean);
+
+  for (const link of links) {
+    if (!(await link.isVisible().catch(() => false))) continue;
+    const text = normalizeHumanText(await controlText(link));
+    if (mode === "exact" && text === target) return link;
+    if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
+  }
+
+  return null;
 }
 
 async function clickPartnerDetailSubmit(page, playerNumber) {
@@ -646,6 +697,13 @@ function buildBookingUrl(dateParam) {
   url.searchParams.set("date", dateParam);
   url.searchParams.set("course", config.courseId);
   url.searchParams.set("group", config.groupId);
+  return url.toString();
+}
+
+function buildEditBookingUrl(editId) {
+  const url = new URL(config.bookingUrl);
+  url.searchParams.set("edit", editId);
+  url.searchParams.set("newbooking", "1");
   return url.toString();
 }
 
