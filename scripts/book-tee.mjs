@@ -469,7 +469,7 @@ async function fillPartnerDetailPage(page, partnerName, playerNumber) {
   }
 
   const searchTerm = partnerSearchTerm(partnerName);
-  console.log(`Searching partner surname for Player ${playerNumber}: ${searchTerm}.`);
+  console.log(`Searching partner surname prefix for Player ${playerNumber}: ${searchTerm}.`);
   await input.fill(searchTerm).catch(async () => {
     await input.click();
     await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => {});
@@ -710,7 +710,9 @@ function safeLabel(value) {
 }
 
 function partnerSearchTerm(name) {
-  return String(name || "").trim().split(/\s+/).at(-1) || name;
+  const surname = String(name || "").trim().split(/\s+/).at(-1) || "";
+  const prefix = surname.replace(/[^a-z0-9]/gi, "").slice(0, 3);
+  return prefix || surname || name;
 }
 
 async function acceptCodeOfConductIfPresent(page) {

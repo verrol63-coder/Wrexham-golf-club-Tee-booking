@@ -14,7 +14,8 @@
 12. If DRY_RUN=true, stop here.
 13. If provisional booking page appears:
     - Open Enter Details links.
-    - Add partner names.
+    - Search partners by the first three surname letters, then select the full
+      matching member name.
     - Save partner details.
 14. Click Finish.
 15. Capture screenshots and logs.

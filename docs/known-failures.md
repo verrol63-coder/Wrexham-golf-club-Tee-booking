@@ -52,6 +52,11 @@ Known players:
 - Dean Holmes
 - Eddie Buckley
 
+Expected behaviour:
+- Search with the first three surname letters, for example `Rob`, `Hol`, or
+  `Buc`.
+- Select only a result that matches the full configured partner name.
+
 ## GitHub Actions timing issues
 
 Symptoms:
