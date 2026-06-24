@@ -464,15 +464,18 @@ async function fillPartnerDetailPage(page, partnerName, playerNumber) {
     throw new Error(`Could not find a visible name/member search input for Player ${playerNumber}.`);
   }
 
-  console.log(`Entering partner name for Player ${playerNumber}: ${partnerName}.`);
-  await input.fill(partnerName).catch(async () => {
+  const searchTerm = partnerSearchTerm(partnerName);
+  console.log(`Searching partner surname for Player ${playerNumber}: ${searchTerm}.`);
+  await input.fill(searchTerm).catch(async () => {
     await input.click();
     await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => {});
-    await input.pressSequentially(partnerName, { delay: 20 });
+    await input.pressSequentially(searchTerm, { delay: 20 });
   });
 
-  await selectPartnerSuggestion(page, partnerName);
-  await clickPartnerDetailSubmit(page, playerNumber);
+  if (!(await selectPartnerSuggestion(page, partnerName))) {
+    await clickPartnerDetailSubmit(page, playerNumber);
+  }
+
   await page.waitForLoadState("domcontentloaded").catch(() => {});
   await sleep(500);
 }
@@ -522,7 +525,7 @@ async function selectPartnerSuggestion(page, partnerName) {
   const exactSuggestion = await findPartnerResult(page, partnerName, "exact");
   if (exactSuggestion) {
     await exactSuggestion.click();
-    return;
+    return true;
   }
 
   const searchButton = await findActionButton(page, [/search/i, /find/i, /lookup/i], /cancel|back|delete|remove/i);
@@ -534,14 +537,17 @@ async function selectPartnerSuggestion(page, partnerName) {
     const searchedExact = await findPartnerResult(page, partnerName, "exact");
     if (searchedExact) {
       await searchedExact.click();
-      return;
+      return true;
     }
 
     const searchedAllParts = await findPartnerResult(page, partnerName, "all-parts");
     if (searchedAllParts) {
       await searchedAllParts.click();
+      return true;
     }
   }
+
+  return false;
 }
 
 async function findPartnerResult(page, partnerName, mode) {
@@ -641,6 +647,10 @@ function escapeRegex(value) {
 
 function safeLabel(value) {
   return normalizeHumanText(value).replace(/\s+/g, "-") || "player";
+}
+
+function partnerSearchTerm(name) {
+  return String(name || "").trim().split(/\s+/).at(-1) || name;
 }
 
 async function acceptCodeOfConductIfPresent(page) {
