@@ -185,7 +185,7 @@ async function attemptTime(page, gridUrl, time) {
   // The site expands that row inline (rather than navigating to a new page), so
   // wait for the matching submit button to render before doing anything else.
   const submitButton = page.locator(`button:has-text("Book teetime at ${time}")`).first();
-  const formReady = await submitButton.isVisible({ timeout: 5000 }).catch(() => false);
+  const formReady = await submitButton.isVisible({ timeout: 15000 }).catch(() => false);
   if (!formReady) {
     await savePageDiagnostics(page, `no-inline-form-${time.replace(":", "")}`).catch(() => {});
     await saveScreenshot(page, `no-inline-form-${time.replace(":", "")}.png`).catch(() => {});
@@ -273,31 +273,27 @@ async function guardAgainstUnexpectedScreens(page, time) {
 
 async function fillBookingForm(page) {
   await setPlayerCount(page, config.players.length);
+  // NOTE: the initial "Book" popup has no name-entry fields at all - confirmed from
+  // real diagnostics. Partner names are added in a separate "Edit Booking" step
+  // after the slot is reserved (the site warns that placeholder/"Anonymous" slots
+  // get removed after 15 minutes). fillPlayerNames is expected to find 0 fields
+  // here; that step is not yet implemented pending seeing the real edit form.
   await fillPlayerNames(page, config.players);
 }
 
 async function setPlayerCount(page, count) {
-  const playerLabel = `${count} ${count === 1 ? "Player" : "Players"}`;
-  const playerCountLink = page.getByRole("link", { name: playerLabel });
-  if (await playerCountLink.isVisible({ timeout: 1000 }).catch(() => false)) {
-    console.log(`Selecting ${playerLabel}.`);
-    await Promise.all([
-      page.waitForLoadState("domcontentloaded").catch(() => {}),
-      playerCountLink.click(),
-    ]);
+  // Confirmed from real diagnostics: the site uses radio inputs named "numslots"
+  // with values 1-4, NOT a link or <select>. Multiple copies of this radio group
+  // exist in the DOM (one per bookable slot on the grid), so we must scope to the
+  // one that's actually visible - i.e. the popup tied to the slot we just clicked.
+  const radio = page.locator(`input[name="numslots"][value="${count}"]:visible`).first();
+  const isPresent = await radio.isVisible({ timeout: 3000 }).catch(() => false);
+  if (!isPresent) {
+    console.log(`Could not find a visible numslots radio for ${count} players.`);
     return;
   }
-
-  const selects = await page.locator("select").all();
-  for (const select of selects) {
-    const name = `${await select.getAttribute("name").catch(() => "")} ${await select.getAttribute("id").catch(() => "")}`.toLowerCase();
-    if (!/player|slot|ball|number|num|count/.test(name)) continue;
-
-    for (const value of [String(count), `${count} players`, `${count} Player`, `${count} Players`]) {
-      if (await select.selectOption({ label: value }).then(() => true).catch(() => false)) return;
-      if (await select.selectOption(value).then(() => true).catch(() => false)) return;
-    }
-  }
+  console.log(`Selecting ${count} players via numslots radio.`);
+  await radio.check().catch(() => {});
 }
 
 async function fillPlayerNames(page, players) {
