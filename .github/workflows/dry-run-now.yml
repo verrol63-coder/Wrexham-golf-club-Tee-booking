@@ -103,11 +103,6 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
-            echo "No checked-out commit is available; skipping dry-run result publish."
-            exit 0
-          fi
-
           if [ ! -f dry-run-results/latest.txt ]; then
             mkdir -p dry-run-results
             {
@@ -118,6 +113,16 @@ jobs:
               echo "Result: FAILURE - workflow did not create a dry-run result file before the commit step."
             } > dry-run-results/latest.txt
           fi
+
+          # Stash the result file content before switching branches, since the job
+          # may have started from a commit that is now behind the current main.
+          cp dry-run-results/latest.txt /tmp/dry-run-latest.txt
+
+          git fetch origin main
+          git checkout -B main origin/main
+
+          mkdir -p dry-run-results
+          cp /tmp/dry-run-latest.txt dry-run-results/latest.txt
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
