@@ -1,8 +1,8 @@
-Dry run timestamp UTC: 2026-06-24T07:45:36Z
-Trigger SHA: 943a657555859b703825dd9ba91fe9bb0b057e3d
-Exit status: 1
+Dry run timestamp UTC: 2026-06-24T07:59:08Z
+Trigger SHA: 1ab842ea364237082eb5b4c188c51a1ba812a920
+Exit status: 0
 
-Result: FAILURE - dry run did not reach the booking screen. See sanitized log excerpt below.
+Result: SUCCESS - login worked and the booking screen was reached. No final booking was submitted.
 
 Sanitized log excerpt:
 
@@ -11,18 +11,11 @@ Sanitized log excerpt:
 
 Target date: 2026-06-28
 Preferred times: 17:40, 17:50
-Players: Verrol Skerritt, Richard Roberts, Dean Holmes, Eddie Buckly
+Players: Verrol Skerritt, Richard Roberts, Dean Holmes, Eddie Buckley
 DRY_RUN=true: final submit will not be clicked.
 Tee Time Booking Code of Conduct gate detected; accepting it.
 Trying 17:40 on the live grid.
 Clicking Book for 17:40.
-node:internal/modules/run_main:123
-    triggerUncaughtException(
-    ^
-
-Error: Clicked Book for 17:40, but its inline booking form/submit button never appeared. See diagnostics.
-    at attemptTime (file:///home/runner/work/Wrexham-golf-club-Tee-booking/Wrexham-golf-club-Tee-booking/scripts/book-tee.mjs:192:11)
-    at async main (file:///home/runner/work/Wrexham-golf-club-Tee-booking/Wrexham-golf-club-Tee-booking/scripts/book-tee.mjs:98:22)
-    at async file:///home/runner/work/Wrexham-golf-club-Tee-booking/Wrexham-golf-club-Tee-booking/scripts/book-tee.mjs:33:1
-
-Node.js v22.22.3
+Selecting 4 players via numslots radio.
+Only found 0 partner/player fields for 3 additional players. The booking page may use a custom member picker.
+Dry run reached the booking screen for 17:40. No final submit clicked.
