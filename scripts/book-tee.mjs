@@ -69,9 +69,15 @@ async function main() {
     await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
     await dismissCookieBanner(page);
 
+    // The site gates the booking area behind a one-time "Tee Time Booking Code of
+    // Conduct" consent page (ttbconsent.php) for a fresh session. If we land there,
+    // accept it and go back to the grid we actually wanted.
+    if (await acceptCodeOfConductIfPresent(page)) {
+      await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+      await dismissCookieBanner(page);
+    }
+
     // DIAGNOSTIC: capture what the tee sheet grid actually looks like before release.
-    // This is needed to learn the real markup/link format the site uses for a bookable
-    // slot, instead of guessing a "&book=HH:MM:00" URL pattern. Safe no-op otherwise.
     await captureGridDiagnostics(page, "grid-before-release");
 
     if (config.waitFor1900) {
@@ -81,6 +87,10 @@ async function main() {
       // live, clickable links once the booking window actually opens.
       await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
       await dismissCookieBanner(page);
+      if (await acceptCodeOfConductIfPresent(page)) {
+        await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+        await dismissCookieBanner(page);
+      }
       await captureGridDiagnostics(page, "grid-after-release");
     }
 
@@ -140,6 +150,12 @@ async function attemptTime(page, gridUrl, time) {
 
   await page.goto(bookingUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
   await dismissCookieBanner(page);
+
+  if (await acceptCodeOfConductIfPresent(page)) {
+    await page.goto(bookingUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+    await dismissCookieBanner(page);
+  }
+
   await guardAgainstUnexpectedScreens(page, time);
 
   const unavailable = await hasText(page, /not available|no longer available|already booked|fully booked|booking is not open|not yet open/i);
@@ -319,6 +335,22 @@ async function clickFinalBookingButton(page) {
 
   await savePageDiagnostics(page, "no-final-booking-button").catch(() => {});
   return false;
+}
+
+async function acceptCodeOfConductIfPresent(page) {
+  // The site gates booking behind a one-time consent page (ttbconsent.php) for a
+  // fresh session, with an exact link: text "I accept this code of conduct",
+  // href "?action=accept", class "btn btn-success". Confirmed from real diagnostics.
+  const acceptLink = page.getByRole("link", { name: "I accept this code of conduct" });
+  const isPresent = await acceptLink.isVisible({ timeout: 1000 }).catch(() => false);
+  if (!isPresent) return false;
+
+  console.log("Tee Time Booking Code of Conduct gate detected; accepting it.");
+  await Promise.all([
+    page.waitForLoadState("domcontentloaded").catch(() => {}),
+    acceptLink.click(),
+  ]);
+  return true;
 }
 
 async function dismissCookieBanner(page) {
