@@ -79,10 +79,12 @@ async function main() {
       }
 
       await completePartnerDetails(page, config.primaryTime || "booking", config.players);
+      const readyText = await confirmationCheckText(page);
+      const finishClicked = await finishPartnerDetailsIfPresent(page, readyText, config.players);
       await saveScreenshot(page, `partners-complete-${(config.primaryTime || "booking").replace(":", "")}.png`);
 
       const completedText = await confirmationCheckText(page);
-      if (isPartnerDetailsComplete(completedText, config.players)) {
+      if (finishClicked || isPartnerDetailsComplete(completedText, config.players)) {
         console.log(`Partner details appear complete for existing booking ${config.bookingEditId}.`);
         return;
       }
@@ -244,10 +246,12 @@ async function attemptTime(page, gridUrl, time) {
   if (isProvisionalBookingText(finalText)) {
     console.log(`Provisional booking held for ${time}; entering playing partner details.`);
     await completePartnerDetails(page, time, config.players);
+    const readyText = await confirmationCheckText(page);
+    const finishClicked = await finishPartnerDetailsIfPresent(page, readyText, config.players);
     await saveScreenshot(page, `partners-complete-${time.replace(":", "")}.png`);
 
     const completedText = await confirmationCheckText(page);
-    if (isPartnerDetailsComplete(completedText, config.players)) {
+    if (finishClicked || isPartnerDetailsComplete(completedText, config.players)) {
       console.log(`Booking details appear complete for ${time} on ${config.targetDate || defaultTargetDateIso()}.`);
       return "booked";
     }
@@ -627,6 +631,25 @@ async function returnToProvisionalBookingIfNeeded(page) {
   await dismissCookieBanner(page);
 }
 
+async function finishPartnerDetailsIfPresent(page, text, players) {
+  if (!allPartnerNamesPresent(text, players)) return false;
+  if (!/successfully\s+entered\s+the\s+details\s+of\s+all\s+your\s+playing\s+partners|click\s+finish\s+to\s+send\s+emails/i.test(text)) {
+    return false;
+  }
+
+  const finishLink = page.locator("a.finish, a[href*='redirectToHome=1']").filter({ hasText: /finish/i }).first();
+  if (!(await finishLink.isVisible({ timeout: 1000 }).catch(() => false))) return false;
+
+  console.log("Clicking Finish to send partner emails.");
+  await Promise.all([
+    page.waitForLoadState("domcontentloaded").catch(() => {}),
+    finishLink.click(),
+  ]);
+  await dismissCookieBanner(page);
+  await sleep(500);
+  return true;
+}
+
 async function findActionButton(page, labels, blockers) {
   const candidates = await page.locator("button, input[type='submit'], input[type='button'], a.btn, a.button, a").all();
   for (const candidate of candidates) {
@@ -653,8 +676,13 @@ async function controlText(locator) {
 }
 
 function isPartnerDetailsComplete(text, players) {
-  const namesPresent = players.slice(1).every((name) => playerNameLooksPresent(text, name));
+  const namesPresent = allPartnerNamesPresent(text, players);
+  if (namesPresent && /successfully\s+entered\s+the\s+details\s+of\s+all\s+your\s+playing\s+partners/i.test(text)) return true;
   return namesPresent && !/enter details|you must enter the names of your playing partners/i.test(text);
+}
+
+function allPartnerNamesPresent(text, players) {
+  return players.slice(1).every((name) => playerNameLooksPresent(text, name));
 }
 
 function playerNameLooksPresent(text, name) {
