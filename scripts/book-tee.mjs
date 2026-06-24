@@ -473,7 +473,8 @@ async function fillPartnerDetailPage(page, partnerName, playerNumber) {
   });
 
   if (!(await selectPartnerSuggestion(page, partnerName))) {
-    await clickPartnerDetailSubmit(page, playerNumber);
+    await savePageDiagnostics(page, `player-${playerNumber}-partner-not-found`).catch(() => {});
+    throw new Error(`Could not select a matching member record for Player ${playerNumber}: ${partnerName}.`);
   }
 
   await page.waitForLoadState("domcontentloaded").catch(() => {});
@@ -528,29 +529,26 @@ async function selectPartnerSuggestion(page, partnerName) {
     return true;
   }
 
-  const searchButton = await findActionButton(page, [/search/i, /find/i, /lookup/i], /cancel|back|delete|remove/i);
+  const searchButton = await findActionButton(page, [/search/i, /find/i, /lookup/i, /^submit$/i], /cancel|back|delete|remove/i);
   if (searchButton) {
+    console.log(`Submitting member surname search for ${partnerName}.`);
     await searchButton.click().catch(() => {});
     await page.waitForLoadState("domcontentloaded").catch(() => {});
     await sleep(750);
 
-    const searchedExact = await findPartnerResult(page, partnerName, "exact");
-    if (searchedExact) {
-      await searchedExact.click();
+    const searchedMatch = await findPartnerResult(page, partnerName, "matching-name");
+    if (searchedMatch) {
+      console.log(`Selecting visible member result for ${partnerName}.`);
+      await searchedMatch.click();
       return true;
     }
 
     await selectFirstInitialRange(page, partnerName);
 
-    const rangedExact = await findPartnerResult(page, partnerName, "exact");
-    if (rangedExact) {
-      await rangedExact.click();
-      return true;
-    }
-
-    const searchedAllParts = await findPartnerResult(page, partnerName, "all-parts");
-    if (searchedAllParts) {
-      await searchedAllParts.click();
+    const rangedMatch = await findPartnerResult(page, partnerName, "matching-name");
+    if (rangedMatch) {
+      console.log(`Selecting ranged member result for ${partnerName}.`);
+      await rangedMatch.click();
       return true;
     }
   }
@@ -565,9 +563,10 @@ async function selectFirstInitialRange(page, partnerName) {
   const rangeLink = page.getByRole("link", { name: label }).first();
   if (!(await rangeLink.isVisible({ timeout: 1000 }).catch(() => false))) return;
 
+  console.log(`Filtering member results to first-name range ${label}.`);
   await rangeLink.click().catch(() => {});
   await page.waitForLoadState("domcontentloaded").catch(() => {});
-  await sleep(500);
+  await sleep(1500);
 }
 
 function firstInitialRangeLabel(partnerName) {
@@ -590,6 +589,8 @@ async function findPartnerResult(page, partnerName, mode) {
     if (!(await link.isVisible().catch(() => false))) continue;
     const text = normalizeHumanText(await controlText(link));
     if (mode === "exact" && text === target) return link;
+    if (mode === "matching-name" && (text === target || text.startsWith(`${target} `))) return link;
+    if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
     if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
   }
 
@@ -887,7 +888,7 @@ async function savePageDiagnostics(page, label) {
         const style = window.getComputedStyle(element);
         return style && style.display !== "none" && style.visibility !== "hidden";
       })
-      .slice(0, 100)
+      .slice(0, 160)
       .map((element) => ({
         tag: element.tagName.toLowerCase(),
         type: element.getAttribute("type") || "",
@@ -900,6 +901,8 @@ async function savePageDiagnostics(page, label) {
         ariaLabel: element.getAttribute("aria-label") || "",
         title: element.getAttribute("title") || "",
         className: element.getAttribute("class") || "",
+        onclick: element.getAttribute("onclick") || "",
+        dataset: { ...element.dataset },
       })),
   }));
   await fs.writeFile(path.join(ARTIFACT_DIR, `${label}-page.json`), JSON.stringify(diagnostics, null, 2), "utf8");
