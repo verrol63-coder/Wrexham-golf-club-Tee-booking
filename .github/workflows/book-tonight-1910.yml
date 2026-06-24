@@ -1,0 +1,67 @@
+name: Book Wrexham tonight 19:10
+
+on:
+  push:
+    paths:
+      - ".github/workflows/book-tonight-1910.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wrexham-tonight-1910
+  cancel-in-progress: false
+
+jobs:
+  book:
+    runs-on: ubuntu-latest
+    environment: Wrexham-golf-club-Tee-booking
+    timeout-minutes: 20
+    env:
+      TZ: Europe/London
+      BOOKING_URL: https://www.wrexhamgolfclub.co.uk/memberbooking/
+      LOGIN_URL: https://www.wrexhamgolfclub.co.uk/login.php
+      PRIMARY_TEE_TIME: "19:10"
+      SECONDARY_TEE_TIME: ""
+      PLAYER_NAMES: "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckley"
+      COURSE_ID: "779"
+      GROUP_ID: "1"
+      REQUIRE_BOOKING_WINDOW: "false"
+      WAIT_FOR_LOGIN: "false"
+      WAIT_FOR_1900: "false"
+      TARGET_DATE: "2026-06-24"
+      DRY_RUN: "false"
+      IG_MEMBER_ID: ${{ secrets.IG_MEMBER_ID }}
+      IG_PIN: ${{ secrets.IG_PIN }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Show runtime versions
+        shell: bash
+        run: |
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        shell: bash
+        run: npm ci
+
+      - name: Install Chromium
+        shell: bash
+        run: npx playwright install --with-deps chromium
+
+      - name: Book 19:10 tonight
+        shell: bash
+        run: npm run book
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: booking-run-artifacts
+          path: artifacts/
+          if-no-files-found: ignore
