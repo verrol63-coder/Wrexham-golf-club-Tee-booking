@@ -12,7 +12,7 @@ const config = {
   pin: env("IG_PIN", env("IG_PASSWORD", "")),
   primaryTime: normalizeTime(env("PRIMARY_TEE_TIME", "07:50")),
   secondaryTime: normalizeTime(env("SECONDARY_TEE_TIME", "08:30")),
-  players: env("PLAYER_NAMES", "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckly")
+  players: env("PLAYER_NAMES", "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckley")
     .split("|")
     .map((name) => name.trim())
     .filter(Boolean),
@@ -184,9 +184,8 @@ async function attemptTime(page, gridUrl, time) {
 
   // The site expands that row inline (rather than navigating to a new page), so
   // wait for the matching submit button to render before doing anything else.
-  const submitButton = page.locator(`button:has-text("Book teetime at ${time}")`).first();
-  const formReady = await submitButton.isVisible({ timeout: 15000 }).catch(() => false);
-  if (!formReady) {
+  const submitButton = await findBookingSubmitButton(page, time, 20000);
+  if (!submitButton) {
     await savePageDiagnostics(page, `no-inline-form-${time.replace(":", "")}`).catch(() => {});
     await saveScreenshot(page, `no-inline-form-${time.replace(":", "")}.png`).catch(() => {});
     throw new Error(`Clicked Book for ${time}, but its inline booking form/submit button never appeared. See diagnostics.`);
@@ -217,6 +216,21 @@ async function attemptTime(page, gridUrl, time) {
   await saveScreenshot(page, `submitted-${time.replace(":", "")}.png`);
 
   const finalText = await confirmationCheckText(page);
+  if (isProvisionalBookingText(finalText)) {
+    console.log(`Provisional booking held for ${time}; entering playing partner details.`);
+    await completePartnerDetails(page, time, config.players);
+    await saveScreenshot(page, `partners-complete-${time.replace(":", "")}.png`);
+
+    const completedText = await confirmationCheckText(page);
+    if (isPartnerDetailsComplete(completedText, config.players)) {
+      console.log(`Booking details appear complete for ${time} on ${config.targetDate || defaultTargetDateIso()}.`);
+      return "booked";
+    }
+
+    await savePageDiagnostics(page, `partners-incomplete-${time.replace(":", "")}`).catch(() => {});
+    throw new Error(`Entered partner details for ${time}, but the page still did not look complete. See diagnostics.`);
+  }
+
   if (isConfirmationText(finalText)) {
     console.log(`Booking appears confirmed for ${time} on ${config.targetDate || defaultTargetDateIso()}.`);
     return "booked";
@@ -230,6 +244,22 @@ async function attemptTime(page, gridUrl, time) {
   throw new Error(`Clicked the booking submit button for ${time}, but no clear confirmation text was found afterward. Treating as failed rather than assuming success - see diagnostics.`);
 }
 
+async function findBookingSubmitButton(page, time, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  const label = new RegExp(`book\\s+tee\\s*time\\s+at\\s+${escapeRegex(time)}`, "i");
+
+  while (Date.now() < deadline) {
+    const candidates = await page.locator("button, input[type='submit'], input[type='button'], a.btn, a.button").all();
+    for (const candidate of candidates) {
+      if (!(await candidate.isVisible().catch(() => false))) continue;
+      if (label.test(await controlText(candidate))) return candidate;
+    }
+    await sleep(250);
+  }
+
+  return null;
+}
+
 // Some generic site notices (e.g. an unrelated sidebar reminder) contain words
 // like "booked" and would otherwise cause a false-positive confirmation match.
 // Strip known noise phrases before testing for a real confirmation.
@@ -241,6 +271,12 @@ function confirmationCheckText(page) {
 
 function isConfirmationText(text) {
   return /confirmed|booking reference|thank you for your booking|your booking is confirmed/i.test(text);
+}
+
+function isProvisionalBookingText(text) {
+  return /provisionally\s+reserved|enter\s+the\s+details\s+of\s+your\s+playing\s+partners|you\s+must\s+enter\s+the\s+names\s+of\s+your\s+playing\s+partners/i.test(
+    text
+  );
 }
 
 async function guardAgainstUnexpectedScreens(page, time) {
@@ -273,11 +309,8 @@ async function guardAgainstUnexpectedScreens(page, time) {
 
 async function fillBookingForm(page) {
   await setPlayerCount(page, config.players.length);
-  // NOTE: the initial "Book" popup has no name-entry fields at all - confirmed from
-  // real diagnostics. Partner names are added in a separate "Edit Booking" step
-  // after the slot is reserved (the site warns that placeholder/"Anonymous" slots
-  // get removed after 15 minutes). fillPlayerNames is expected to find 0 fields
-  // here; that step is not yet implemented pending seeing the real edit form.
+  // The initial "Book" popup has no name-entry fields; partner names are added
+  // from the provisional booking page after the slot is reserved.
   await fillPlayerNames(page, config.players);
 }
 
@@ -333,6 +366,230 @@ async function fillPlayerNames(page, players) {
       `Only found ${candidateInputs.length} partner/player fields for ${namesToFill.length} additional players. The booking page may use a custom member picker.`
     );
   }
+}
+
+async function completePartnerDetails(page, time, players) {
+  const partnerNames = players.slice(1);
+  if (partnerNames.length === 0) return;
+
+  await savePageDiagnostics(page, `provisional-${time.replace(":", "")}`).catch(() => {});
+
+  for (let index = 0; index < partnerNames.length; index += 1) {
+    const playerNumber = index + 2;
+    const partnerName = partnerNames[index];
+    let currentText = await bodyText(page);
+
+    if (playerNameLooksPresent(currentText, partnerName)) {
+      console.log(`Player ${playerNumber} already appears to be ${partnerName}.`);
+      continue;
+    }
+
+    if (!isProvisionalBookingText(currentText)) {
+      await savePageDiagnostics(page, `before-player-${playerNumber}-unexpected-page`).catch(() => {});
+      throw new Error(`Expected the provisional booking page before entering Player ${playerNumber}, but found a different page.`);
+    }
+
+    const detailsLink = await findEnterDetailsLink(page, playerNumber);
+    if (!detailsLink) {
+      await savePageDiagnostics(page, `missing-player-${playerNumber}-details-link`).catch(() => {});
+      throw new Error(`Could not find the Enter Details link for Player ${playerNumber}.`);
+    }
+
+    console.log(`Opening Enter Details for Player ${playerNumber}: ${partnerName}.`);
+    await Promise.all([
+      page.waitForLoadState("domcontentloaded").catch(() => {}),
+      detailsLink.click(),
+    ]);
+    await dismissCookieBanner(page);
+    await savePageDiagnostics(page, `player-${playerNumber}-details-opened`).catch(() => {});
+
+    await fillPartnerDetailPage(page, partnerName, playerNumber);
+    await returnToProvisionalBookingIfNeeded(page);
+
+    currentText = await bodyText(page);
+    if (!playerNameLooksPresent(currentText, partnerName)) {
+      await savePageDiagnostics(page, `player-${playerNumber}-not-saved`).catch(() => {});
+      throw new Error(`Entered Player ${playerNumber} as ${partnerName}, but the booking page did not show that name afterward.`);
+    }
+
+    await saveScreenshot(page, `player-${playerNumber}-${safeLabel(partnerName)}.png`).catch(() => {});
+  }
+}
+
+async function findEnterDetailsLink(page, playerNumber) {
+  const rowLink = page
+    .locator(`xpath=//*[normalize-space(.)="Player ${playerNumber}"]/following::a[contains(normalize-space(.), "Enter Details")][1]`)
+    .first();
+  if (await rowLink.isVisible({ timeout: 1000 }).catch(() => false)) return rowLink;
+
+  const links = await page.getByRole("link", { name: /enter details/i }).all();
+  for (const link of links) {
+    if (await link.isVisible().catch(() => false)) return link;
+  }
+
+  return null;
+}
+
+async function fillPartnerDetailPage(page, partnerName, playerNumber) {
+  const input = await findPartnerInput(page);
+  if (!input) {
+    await savePageDiagnostics(page, `player-${playerNumber}-no-input`).catch(() => {});
+    throw new Error(`Could not find a visible name/member search input for Player ${playerNumber}.`);
+  }
+
+  console.log(`Entering partner name for Player ${playerNumber}: ${partnerName}.`);
+  await input.fill(partnerName).catch(async () => {
+    await input.click();
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => {});
+    await input.pressSequentially(partnerName, { delay: 20 });
+  });
+
+  await selectPartnerSuggestion(page, partnerName);
+  await clickPartnerDetailSubmit(page, playerNumber);
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await sleep(500);
+}
+
+async function findPartnerInput(page) {
+  const candidates = await page
+    .locator('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]), textarea')
+    .all();
+
+  let fallback = null;
+  for (const candidate of candidates) {
+    if (!(await candidate.isVisible().catch(() => false))) continue;
+
+    const descriptor = [
+      await candidate.getAttribute("name").catch(() => ""),
+      await candidate.getAttribute("id").catch(() => ""),
+      await candidate.getAttribute("placeholder").catch(() => ""),
+      await candidate.getAttribute("aria-label").catch(() => ""),
+      await candidate.getAttribute("title").catch(() => ""),
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    if (/csrf|password|pin|email|phone|mobile|terms|note|comment|date|time/.test(descriptor)) continue;
+    if (/member|player|guest|name|partner|search/.test(descriptor)) return candidate;
+    fallback ??= candidate;
+  }
+
+  return fallback;
+}
+
+async function selectPartnerSuggestion(page, partnerName) {
+  await sleep(750);
+
+  const exactSuggestion = page.getByText(new RegExp(`^\\s*${escapeRegex(partnerName)}\\s*$`, "i")).first();
+  if (await exactSuggestion.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await exactSuggestion.click().catch(() => {});
+    return;
+  }
+
+  const surname = partnerName.trim().split(/\s+/).at(-1);
+  if (surname) {
+    const surnameSuggestion = page.getByText(new RegExp(`\\b${escapeRegex(surname)}\\b`, "i")).first();
+    if (await surnameSuggestion.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await surnameSuggestion.click().catch(() => {});
+      return;
+    }
+  }
+
+  const searchButton = await findActionButton(page, [/search/i, /find/i, /lookup/i], /cancel|back|delete|remove/i);
+  if (searchButton) {
+    await searchButton.click().catch(() => {});
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await sleep(750);
+
+    const result = page.getByText(new RegExp(`\\b${escapeRegex(surname || partnerName)}\\b`, "i")).first();
+    if (await result.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await result.click().catch(() => {});
+    }
+  }
+}
+
+async function clickPartnerDetailSubmit(page, playerNumber) {
+  const submitButton = await findActionButton(
+    page,
+    [/save/i, /update/i, /add/i, /confirm/i, /continue/i, /submit/i, /done/i],
+    /cancel|remove|delete|back|logout|login|home|news|information|competition|diary|cookie/i
+  );
+
+  if (!submitButton) {
+    await savePageDiagnostics(page, `player-${playerNumber}-no-submit`).catch(() => {});
+    throw new Error(`Could not find a safe submit/save button for Player ${playerNumber}.`);
+  }
+
+  console.log(`Saving details for Player ${playerNumber}.`);
+  await submitButton.click();
+}
+
+async function returnToProvisionalBookingIfNeeded(page) {
+  const text = await bodyText(page);
+  if (isProvisionalBookingText(text)) return;
+
+  const backLink = await findActionButton(page, [/back to booking/i, /return to booking/i, /done/i, /continue/i], /cancel|remove|delete|logout|login/i);
+  if (!backLink) return;
+
+  await Promise.all([
+    page.waitForLoadState("domcontentloaded").catch(() => {}),
+    backLink.click(),
+  ]);
+  await dismissCookieBanner(page);
+}
+
+async function findActionButton(page, labels, blockers) {
+  const candidates = await page.locator("button, input[type='submit'], input[type='button'], a.btn, a.button, a").all();
+  for (const candidate of candidates) {
+    if (!(await candidate.isVisible().catch(() => false))) continue;
+    const text = await controlText(candidate);
+    const href = `${await candidate.getAttribute("href").catch(() => "")}`;
+    if (!text && !href) continue;
+    if (blockers.test(text) || blockers.test(href)) continue;
+    if (labels.some((label) => label.test(text) || label.test(href))) return candidate;
+  }
+  return null;
+}
+
+async function controlText(locator) {
+  return [
+    await locator.innerText().catch(() => ""),
+    await locator.getAttribute("value").catch(() => ""),
+    await locator.getAttribute("aria-label").catch(() => ""),
+    await locator.getAttribute("title").catch(() => ""),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+}
+
+function isPartnerDetailsComplete(text, players) {
+  const namesPresent = players.slice(1).every((name) => playerNameLooksPresent(text, name));
+  return namesPresent && !/enter details|you must enter the names of your playing partners/i.test(text);
+}
+
+function playerNameLooksPresent(text, name) {
+  const normalizedText = normalizeHumanText(text);
+  const normalizedName = normalizeHumanText(name);
+  if (normalizedText.includes(normalizedName)) return true;
+
+  const parts = normalizedName.split(" ").filter(Boolean);
+  return parts.length > 1 && parts.every((part) => normalizedText.includes(part));
+}
+
+function normalizeHumanText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function safeLabel(value) {
+  return normalizeHumanText(value).replace(/\s+/g, "-") || "player";
 }
 
 async function acceptCodeOfConductIfPresent(page) {
@@ -539,6 +796,10 @@ async function savePageDiagnostics(page, label) {
         href: element.getAttribute("href") || "",
         name: element.getAttribute("name") || "",
         id: element.getAttribute("id") || "",
+        value: element.getAttribute("value") || "",
+        placeholder: element.getAttribute("placeholder") || "",
+        ariaLabel: element.getAttribute("aria-label") || "",
+        title: element.getAttribute("title") || "",
         className: element.getAttribute("class") || "",
       })),
   }));

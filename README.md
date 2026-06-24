@@ -7,7 +7,7 @@ This repository contains scheduled cloud automations for Wrexham Golf Club tee-t
 - Sunday evening: targets the following Sunday, 7 days ahead.
   - Tries `07:50` first.
   - Tries `08:30` second if the first time is unavailable.
-  - Books 4 players: Verrol Skerritt, Richard Roberts, Dean Holmes, Eddie Buckly.
+  - Books 4 players: Verrol Skerritt, Richard Roberts, Dean Holmes, Eddie Buckley.
 - Tuesday evening: targets the following Tuesday, 7 days ahead.
   - Tries `07:30`.
   - Books Verrol Skerritt only.
