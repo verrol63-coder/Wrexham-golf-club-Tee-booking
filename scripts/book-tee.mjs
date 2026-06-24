@@ -540,6 +540,14 @@ async function selectPartnerSuggestion(page, partnerName) {
       return true;
     }
 
+    await selectFirstInitialRange(page, partnerName);
+
+    const rangedExact = await findPartnerResult(page, partnerName, "exact");
+    if (rangedExact) {
+      await rangedExact.click();
+      return true;
+    }
+
     const searchedAllParts = await findPartnerResult(page, partnerName, "all-parts");
     if (searchedAllParts) {
       await searchedAllParts.click();
@@ -548,6 +556,29 @@ async function selectPartnerSuggestion(page, partnerName) {
   }
 
   return false;
+}
+
+async function selectFirstInitialRange(page, partnerName) {
+  const label = firstInitialRangeLabel(partnerName);
+  if (!label) return;
+
+  const rangeLink = page.getByRole("link", { name: label }).first();
+  if (!(await rangeLink.isVisible({ timeout: 1000 }).catch(() => false))) return;
+
+  await rangeLink.click().catch(() => {});
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await sleep(500);
+}
+
+function firstInitialRangeLabel(partnerName) {
+  const first = String(partnerName || "").trim()[0]?.toUpperCase();
+  if (!first) return "";
+  if (first >= "A" && first <= "E") return "A - E";
+  if (first >= "F" && first <= "J") return "F - J";
+  if (first >= "K" && first <= "O") return "K - O";
+  if (first >= "P" && first <= "T") return "P - T";
+  if (first >= "U" && first <= "Z") return "U - Z";
+  return "";
 }
 
 async function findPartnerResult(page, partnerName, mode) {
