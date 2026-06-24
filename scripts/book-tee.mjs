@@ -12,10 +12,7 @@ const config = {
   pin: env("IG_PIN", env("IG_PASSWORD", "")),
   primaryTime: normalizeTime(env("PRIMARY_TEE_TIME", "07:50")),
   secondaryTime: normalizeTime(env("SECONDARY_TEE_TIME", "08:30")),
-  players: env("PLAYER_NAMES", "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckley")
-    .split("|")
-    .map((name) => name.trim())
-    .filter(Boolean),
+  players: parsePlayerNames(env("PLAYER_NAMES", "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckley")),
   courseId: env("COURSE_ID", "779"),
   groupId: env("GROUP_ID", "1"),
   dryRun: flag("DRY_RUN"),
@@ -867,6 +864,13 @@ function parseWeekdays(value) {
   }
 
   return indexes;
+}
+
+function parsePlayerNames(value) {
+  return String(value || "")
+    .split(/[|,;\r\n]+/)
+    .map((name) => name.trim())
+    .filter(Boolean);
 }
 
 function parseOptionalInteger(value) {

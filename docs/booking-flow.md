@@ -26,3 +26,11 @@ Key artifacts:
 - ready-*.png
 - partners-complete-*.png
 - page JSON diagnostics
+
+## Custom workflow UI
+
+Use `Book Wrexham custom tee` in the GitHub Actions tab to choose a target date,
+primary and secondary tee times, player names, dry-run mode, and booking-window
+controls without editing workflow files.
+
+Player names can be separated with commas, semicolons, new lines, or `|`.
