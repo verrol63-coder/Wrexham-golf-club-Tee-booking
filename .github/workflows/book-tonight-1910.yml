@@ -1,4 +1,5 @@
 name: Book Wrexham tonight 19:10
+# One-off completion trigger for the held 2026-06-24 19:10 booking.
 
 on:
   push:
