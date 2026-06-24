@@ -633,12 +633,12 @@ async function returnToProvisionalBookingIfNeeded(page) {
 
 async function finishPartnerDetailsIfPresent(page, text, players) {
   if (!allPartnerNamesPresent(text, players)) return false;
-  if (!/successfully\s+entered\s+the\s+details\s+of\s+all\s+your\s+playing\s+partners|click\s+finish\s+to\s+send\s+emails/i.test(text)) {
-    return false;
-  }
 
   const finishLink = page.locator("a.finish, a[href*='redirectToHome=1']").filter({ hasText: /finish/i }).first();
-  if (!(await finishLink.isVisible({ timeout: 1000 }).catch(() => false))) return false;
+  if (!(await finishLink.isVisible({ timeout: 1000 }).catch(() => false))) {
+    console.log("All partner names are present, but no Finish link was visible.");
+    return false;
+  }
 
   console.log("Clicking Finish to send partner emails.");
   await Promise.all([
