@@ -145,29 +145,57 @@ async function loginAsMember(page) {
 }
 
 async function attemptTime(page, gridUrl, time) {
-  const bookingUrl = `${gridUrl}&book=${encodeURIComponent(`${time}:00`)}`;
-  console.log(`Trying ${time} via ${bookingUrl}`);
+  console.log(`Trying ${time} on the live grid.`);
 
-  await page.goto(bookingUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+  // Always start from the plain grid for this attempt, in case a previous
+  // attempt left the page in a different state.
+  await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
   await dismissCookieBanner(page);
 
   if (await acceptCodeOfConductIfPresent(page)) {
-    await page.goto(bookingUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+    await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
     await dismissCookieBanner(page);
   }
 
   await guardAgainstUnexpectedScreens(page, time);
 
-  const unavailable = await hasText(page, /not available|no longer available|already booked|fully booked|booking is not open|not yet open/i);
-  if (unavailable) {
-    console.log(`${time} is not available yet or has already gone.`);
+  // The site renders one "Book" link per open slot, each with its own href like
+  // "?date=...&book=17:40:00" (confirmed from real site diagnostics). Scoping to
+  // this exact href means we can never click a different time's button, even
+  // though many other "Book" links for other times are on the same page.
+  const bookLink = page.locator(`a.inlineBooking[href*="book=${time}:00"]`).first();
+  const isBookable = await bookLink.isVisible({ timeout: 2000 }).catch(() => false);
+
+  if (!isBookable) {
+    const stillTaken = await hasText(
+      page,
+      /not available|no longer available|already booked|fully booked|booking is not open|not yet open/i
+    );
+    console.log(
+      stillTaken
+        ? `${time} is not available - the slot text indicates it's taken or not open yet.`
+        : `${time} has no visible "Book" link on the grid - most likely already taken.`
+    );
     return "unavailable";
+  }
+
+  console.log(`Clicking Book for ${time}.`);
+  await bookLink.click();
+
+  // The site expands that row inline (rather than navigating to a new page), so
+  // wait for the matching submit button to render before doing anything else.
+  const submitButton = page.locator(`button:has-text("Book teetime at ${time}")`).first();
+  const formReady = await submitButton.isVisible({ timeout: 5000 }).catch(() => false);
+  if (!formReady) {
+    await savePageDiagnostics(page, `no-inline-form-${time.replace(":", "")}`).catch(() => {});
+    await saveScreenshot(page, `no-inline-form-${time.replace(":", "")}.png`).catch(() => {});
+    throw new Error(`Clicked Book for ${time}, but its inline booking form/submit button never appeared. See diagnostics.`);
   }
 
   await fillBookingForm(page);
 
-  const afterFillText = await bodyText(page);
-  if (/confirmed|booked|booking reference|success|thank you/i.test(afterFillText)) {
+  const afterFillText = await confirmationCheckText(page);
+  if (isConfirmationText(afterFillText)) {
     console.log(`Booking appears confirmed for ${time} on ${config.targetDate || defaultTargetDateIso()}.`);
     await saveScreenshot(page, `submitted-${time.replace(":", "")}.png`);
     return "booked";
@@ -183,16 +211,13 @@ async function attemptTime(page, gridUrl, time) {
     return "dry-run";
   }
 
-  const clicked = await clickFinalBookingButton(page);
-  if (!clicked) {
-    throw new Error(`Reached ${time}, but could not find a safe final booking/confirm button.`);
-  }
-
+  console.log(`Clicking the scoped submit button: Book teetime at ${time}.`);
+  await submitButton.click();
   await page.waitForLoadState("domcontentloaded").catch(() => {});
   await saveScreenshot(page, `submitted-${time.replace(":", "")}.png`);
 
-  const finalText = await bodyText(page);
-  if (/confirmed|booked|booking reference|success|thank you/i.test(finalText)) {
+  const finalText = await confirmationCheckText(page);
+  if (isConfirmationText(finalText)) {
     console.log(`Booking appears confirmed for ${time} on ${config.targetDate || defaultTargetDateIso()}.`);
     return "booked";
   }
@@ -201,8 +226,21 @@ async function attemptTime(page, gridUrl, time) {
     throw new Error("A payment screen appeared, but this member booking should require no payment. Stopping.");
   }
 
-  console.log("Submitted the booking form. Confirmation text was not obvious; inspect uploaded artifacts.");
-  return "booked";
+  await savePageDiagnostics(page, `unclear-result-${time.replace(":", "")}`).catch(() => {});
+  throw new Error(`Clicked the booking submit button for ${time}, but no clear confirmation text was found afterward. Treating as failed rather than assuming success - see diagnostics.`);
+}
+
+// Some generic site notices (e.g. an unrelated sidebar reminder) contain words
+// like "booked" and would otherwise cause a false-positive confirmation match.
+// Strip known noise phrases before testing for a real confirmation.
+function confirmationCheckText(page) {
+  return bodyText(page).then((text) =>
+    text.replace(/you\s+already\s+have\s+a\s+teetime\s+booked\s+for\s+this\s+day[^\n]*/gi, "")
+  );
+}
+
+function isConfirmationText(text) {
+  return /confirmed|booking reference|thank you for your booking|your booking is confirmed/i.test(text);
 }
 
 async function guardAgainstUnexpectedScreens(page, time) {
@@ -299,42 +337,6 @@ async function fillPlayerNames(page, players) {
       `Only found ${candidateInputs.length} partner/player fields for ${namesToFill.length} additional players. The booking page may use a custom member picker.`
     );
   }
-}
-
-async function clickFinalBookingButton(page) {
-  const labels = [
-    /confirm/i,
-    /confirm booking/i,
-    /book/i,
-    /book now/i,
-    /book tee/i,
-    /book time/i,
-    /make booking/i,
-    /reserve/i,
-    /submit/i,
-    /finish/i,
-    /complete/i,
-    /continue/i,
-    /save/i,
-  ];
-  const blockers = /back|cancel|login|logout|register|reset|search|change|home|news|information|competition|diary|cookie/i;
-  const candidates = await page.locator("button, input[type='submit'], input[type='button'], a").all();
-
-  for (const candidate of candidates) {
-    if (!(await candidate.isVisible().catch(() => false))) continue;
-    const text = `${await candidate.innerText().catch(() => "")} ${await candidate.getAttribute("value").catch(() => "")} ${await candidate.getAttribute("title").catch(() => "")}`.trim();
-    const href = `${await candidate.getAttribute("href").catch(() => "")}`;
-    if (!text && !href) continue;
-    if (blockers.test(text) || blockers.test(href)) continue;
-    if (!labels.some((label) => label.test(text) || label.test(href))) continue;
-
-    console.log(`Clicking final booking candidate: ${text || href}`);
-    await candidate.click();
-    return true;
-  }
-
-  await savePageDiagnostics(page, "no-final-booking-button").catch(() => {});
-  return false;
 }
 
 async function acceptCodeOfConductIfPresent(page) {
