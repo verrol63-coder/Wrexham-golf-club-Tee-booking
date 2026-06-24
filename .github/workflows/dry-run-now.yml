@@ -19,8 +19,8 @@ jobs:
       TZ: Europe/London
       BOOKING_URL: https://www.wrexhamgolfclub.co.uk/memberbooking/
       LOGIN_URL: https://www.wrexhamgolfclub.co.uk/login.php
-      PRIMARY_TEE_TIME: "07:50"
-      SECONDARY_TEE_TIME: "08:30"
+      PRIMARY_TEE_TIME: "17:40"
+      SECONDARY_TEE_TIME: "17:50"
       PLAYER_NAMES: "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckly"
       COURSE_ID: "779"
       GROUP_ID: "1"
