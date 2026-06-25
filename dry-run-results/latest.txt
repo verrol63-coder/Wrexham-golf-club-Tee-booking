@@ -1,5 +1,5 @@
-Dry run timestamp UTC: 2026-06-24T08:00:20Z
-Trigger SHA: b5b44d5d65f9fe9c702a43b2070a4bcd13dc5a6b
+Dry run timestamp UTC: 2026-06-25T12:53:57Z
+Trigger SHA: 11ee7b02e5e9d3e2089d65f11654b2307fc17b31
 Exit status: 0
 
 Result: SUCCESS - login worked and the booking screen was reached. No final booking was submitted.
