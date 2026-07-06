@@ -2,10 +2,9 @@ name: Book Wrexham Sunday tee
 
 on:
   schedule:
-    # GitHub schedules use UTC. These two entries cover 18:35 Europe/London
-    # during both BST and GMT; the script exits unless local time is in-window.
-    - cron: "35 17 * * 0"
-    - cron: "35 18 * * 0"
+        # GitHub schedules use UTC. 17:00 UTC = 18:00 BST, giving a comfortable
+        # buffer before the 18:59 BST login and 19:00 BST booking window.
+        - cron: "0 17 * * 0"
   workflow_dispatch:
     inputs:
       target_date:
@@ -31,7 +30,7 @@ concurrency:
 jobs:
   book:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       TZ: Europe/London
       BOOKING_URL: https://www.wrexhamgolfclub.co.uk/memberbooking/
@@ -41,7 +40,7 @@ jobs:
       PLAYER_NAMES: "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckley"
       COURSE_ID: "779"
       GROUP_ID: "1"
-      REQUIRE_BOOKING_WINDOW: "true"
+      REQUIRE_BOOKING_WINDOW: "false"
       BOOKING_WEEKDAYS: "Sun"
       TARGET_DAYS_AHEAD: "7"
       WAIT_FOR_LOGIN: "true"
@@ -74,6 +73,13 @@ jobs:
         shell: bash
         run: npm ci
 
+      - name: Cache Playwright browsers
+        id: playwright-cache      
+        uses: actions/cache@v4      
+        with:      
+          path: ~/.cache/ms-playwright      
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}      
+      
       - name: Install Chromium
         shell: bash
         run: npx playwright install --with-deps chromium
