@@ -1,3 +1,4 @@
+
 import { chromium } from "playwright";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -467,11 +468,16 @@ async function fillPartnerDetailPage(page, partnerName, playerNumber) {
 
   const searchTerm = partnerSearchTerm(partnerName);
   console.log(`Searching partner surname prefix for Player ${playerNumber}: ${searchTerm}.`);
-  await input.fill(searchTerm).catch(async () => {
+    // The site's partner search box (class "keypartner") filters its member
+    // list live as real keystrokes are typed. Playwright's fill() sets the
+    // value directly without dispatching per-character key events, so the
+    // site's filter never ran and the default/frequent-partner list stayed
+    // on screen (confirmed from a real failed run's diagnostics). Type the
+    // term character-by-character so the live filter actually fires.
     await input.click();
-    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => {});
-    await input.pressSequentially(searchTerm, { delay: 20 });
-  });
+  await input.fill("").catch(() => {});
+  await input.pressSequentially(searchTerm, { delay: 80 });
+  await sleep(600);
 
   if (!(await selectPartnerSuggestion(page, partnerName))) {
     await savePageDiagnostics(page, `player-${playerNumber}-partner-not-found`).catch(() => {});
