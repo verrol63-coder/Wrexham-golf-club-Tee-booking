@@ -13,6 +13,8 @@ const config = {
   pin: env("IG_PIN", env("IG_PASSWORD", "")),
   primaryTime: normalizeTime(env("PRIMARY_TEE_TIME", "07:50")),
   secondaryTime: normalizeTime(env("SECONDARY_TEE_TIME", "08:30")),
+  fallbackWindowStart: normalizeTime(env("FALLBACK_WINDOW_START", "")),
+  fallbackWindowEnd: normalizeTime(env("FALLBACK_WINDOW_END", "")),
   players: parsePlayerNames(env("PLAYER_NAMES", "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckley")),
   courseId: env("COURSE_ID", "779"),
   groupId: env("GROUP_ID", "1"),
@@ -49,6 +51,9 @@ async function main() {
 
   console.log(`Target date: ${targetDateIso}`);
   console.log(`Preferred times: ${candidateTimes.join(", ")}`);
+  if (config.fallbackWindowStart && config.fallbackWindowEnd) {
+    console.log(`Fallback window if preferred times are gone: ${config.fallbackWindowStart}-${config.fallbackWindowEnd}`);
+  }
   console.log(`Players: ${config.players.join(", ")}`);
   console.log(config.dryRun ? "DRY_RUN=true: final submit will not be clicked." : "DRY_RUN=false: booking will be submitted if the expected form is reached.");
 
@@ -126,7 +131,41 @@ async function main() {
       }
     }
 
-    throw new Error(`Neither preferred tee time was bookable: ${candidateTimes.join(", ")}`);
+    // Preferred times can vanish before we even reach the grid if the job's
+    // scheduled start was delayed (GitHub's cron trigger is not guaranteed to
+    // fire on time - see workflow comment). Rather than give up outright, scan
+    // the live grid for any other open slot inside a wider acceptable window
+    // and try the nearest one to the primary time first.
+    if (config.fallbackWindowStart && config.fallbackWindowEnd) {
+      console.log(
+        `Preferred times unavailable; scanning for any open slot between ${config.fallbackWindowStart} and ${config.fallbackWindowEnd}.`
+      );
+      await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+      await dismissCookieBanner(page);
+
+      const fallbackTimes = (
+        await discoverAvailableTimes(page, config.fallbackWindowStart, config.fallbackWindowEnd)
+      ).filter((time) => !candidateTimes.includes(time));
+
+      if (fallbackTimes.length === 0) {
+        console.log("No fallback slots found in range either.");
+      } else {
+        console.log(`Fallback candidates, nearest to primary time first: ${fallbackTimes.join(", ")}`);
+        for (const time of fallbackTimes) {
+          const result = await attemptTime(page, gridUrl, time);
+          if (result === "booked" || result === "dry-run") {
+            return;
+          }
+        }
+      }
+    }
+
+    throw new Error(
+      `No bookable tee time found. Preferred: ${candidateTimes.join(", ")}.` +
+        (config.fallbackWindowStart && config.fallbackWindowEnd
+          ? ` Fallback window ${config.fallbackWindowStart}-${config.fallbackWindowEnd} also had nothing available.`
+          : "")
+    );
   } catch (error) {
     await saveFailureArtifacts(page, error);
     throw error;
@@ -269,6 +308,33 @@ async function attemptTime(page, gridUrl, time) {
 
   await savePageDiagnostics(page, `unclear-result-${time.replace(":", "")}`).catch(() => {});
   throw new Error(`Clicked the booking submit button for ${time}, but no clear confirmation text was found afterward. Treating as failed rather than assuming success - see diagnostics.`);
+}
+
+// Looks at every inline "Book" link currently rendered on the grid and returns
+// the open tee times within [minTime, maxTime], ordered by closeness to the
+// configured primary time. Used as a last-resort fallback when both preferred
+// times are already gone by the time we reach the grid.
+async function discoverAvailableTimes(page, minTime, maxTime) {
+  const hrefs = await page
+    .locator('a.inlineBooking[href*="book="]')
+    .evaluateAll((links) => links.map((el) => el.getAttribute("href") || ""));
+
+  const times = new Set();
+  for (const href of hrefs) {
+    const match = href.match(/book=(\d{2}:\d{2}):00/);
+    if (match) times.add(match[1]);
+  }
+
+  const minMinutes = parseClock(minTime).minutes;
+  const maxMinutes = parseClock(maxTime).minutes;
+  const anchorMinutes = parseClock(config.primaryTime || minTime).minutes;
+
+  return [...times]
+    .filter((time) => {
+      const minutes = parseClock(time).minutes;
+      return minutes >= minMinutes && minutes <= maxMinutes;
+    })
+    .sort((a, b) => Math.abs(parseClock(a).minutes - anchorMinutes) - Math.abs(parseClock(b).minutes - anchorMinutes));
 }
 
 async function findBookingSubmitButton(page, time, timeoutMs) {
@@ -747,7 +813,12 @@ async function dismissCookieBanner(page) {
 async function waitUntilLocalClock(hhmm, label) {
   const target = parseClock(hhmm);
   const start = Date.now();
-  while (Date.now() - start < 40 * 60 * 1000) {
+  // Widened from 40 minutes: the Sunday cron now fires hours before the login
+  // target on purpose (see workflow comment) to absorb GitHub's scheduled-run
+  // delays, so this wait genuinely needs to be able to sit for a long time.
+  // 340 minutes keeps comfortable headroom under GitHub-hosted runners' hard
+  // 360-minute job cap once setup/booking steps are accounted for.
+  while (Date.now() - start < 340 * 60 * 1000) {
     const now = londonNow();
     const minutes = now.hour * 60 + now.minute;
     if (minutes >= target.minutes) {
