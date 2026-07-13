@@ -2,9 +2,15 @@ name: Book Wrexham Sunday tee
 
 on:
   schedule:
-        # GitHub schedules use UTC. 17:00 UTC = 18:00 BST, giving a comfortable
-        # buffer before the 18:59 BST login and 19:00 BST booking window.
-        - cron: "0 17 * * 0"
+        # GitHub schedules use UTC and are NOT guaranteed to fire on time - a
+        # scheduled run on 2026-07-12 fired at 21:10 BST instead of 18:00 BST,
+        # over 3 hours late, causing both preferred tee times to be taken
+        # before the bot even logged in. Triggering much earlier (13:00 UTC /
+        # 14:00 BST) gives a large buffer: even a multi-hour GitHub delay
+        # should still land well before the 18:59 BST login target. The
+        # script's own internal clock-wait (WAIT_FOR_LOGIN/WAIT_FOR_1900)
+        # handles the precise timing once the job is actually running.
+        - cron: "0 13 * * 0"
   workflow_dispatch:
     inputs:
       target_date:
@@ -30,13 +36,15 @@ concurrency:
 jobs:
   book:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 355
     env:
       TZ: Europe/London
       BOOKING_URL: https://www.wrexhamgolfclub.co.uk/memberbooking/
       LOGIN_URL: https://www.wrexhamgolfclub.co.uk/login.php
       PRIMARY_TEE_TIME: "07:50"
       SECONDARY_TEE_TIME: "08:30"
+      FALLBACK_WINDOW_START: "07:00"
+      FALLBACK_WINDOW_END: "09:30"
       PLAYER_NAMES: "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckley"
       COURSE_ID: "779"
       GROUP_ID: "1"
@@ -74,12 +82,12 @@ jobs:
         run: npm ci
 
       - name: Cache Playwright browsers
-        id: playwright-cache      
-        uses: actions/cache@v4      
-        with:      
-          path: ~/.cache/ms-playwright      
-          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}      
-      
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
+
       - name: Install Chromium
         shell: bash
         run: npx playwright install --with-deps chromium
