@@ -26,22 +26,7 @@ jobs:
 
           const scriptFile = 'scripts/book-tee.mjs';
           let source = fs.readFileSync(scriptFile, 'utf8');
-          const oldFunction = `async function findPartnerResult(page, partnerName, mode) {
-            const links = await page.locator('a[href*="addpartner="]').all();
-            const target = normalizeHumanText(partnerName);
-            const targetParts = target.split(" ").filter(Boolean);
 
-            for (const link of links) {
-              if (!(await link.isVisible().catch(() => false))) continue;
-              const text = normalizeHumanText(await controlText(link));
-              if (mode === "exact" && text === target) return link;
-              if (mode === "matching-name" && (text === target || text.startsWith(\`${target} \`))) return link;
-              if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
-              if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
-            }
-
-            return null;
-          }`;
           const newFunction = `async function findPartnerResult(page, partnerName, mode) {
             const links = await page.locator('a[href*="addpartner="]').all();
             const target = normalizeHumanText(partnerName);
@@ -60,8 +45,9 @@ jobs:
 
               if (mode === "matching-name" && surname && initial) {
                 const textParts = text.split(" ").filter(Boolean);
-                const hasInitial = textParts.some((part) => part === initial || part.startsWith(initial));
-                if (textParts.includes(surname) && hasInitial) initialMatches.push(link);
+                const surnameIndex = textParts.indexOf(surname);
+                const hasInitial = textParts.some((part, index) => index !== surnameIndex && part[0] === initial);
+                if (surnameIndex !== -1 && hasInitial) initialMatches.push(link);
               }
 
               if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
@@ -71,26 +57,37 @@ jobs:
             return null;
           }`;
 
-          if (!source.includes(oldFunction)) {
-            if (!source.includes('const initialMatches = [];')) {
-              throw new Error('Expected findPartnerResult implementation was not found.');
+          if (!source.includes('const initialMatches = [];')) {
+            const start = source.indexOf('async function findPartnerResult(page, partnerName, mode) {');
+            const end = source.indexOf('\nasync function clickPartnerDetailSubmit(', start);
+            if (start === -1 || end === -1) {
+              throw new Error('Could not locate findPartnerResult function boundaries.');
             }
-          } else {
-            source = source.replace(oldFunction, newFunction);
+            source = source.slice(0, start) + newFunction + '\n' + source.slice(end + 1);
             fs.writeFileSync(scriptFile, source);
           }
 
           const workflowFile = '.github/workflows/book-wrexham-tee.yml';
           let workflow = fs.readFileSync(workflowFile, 'utf8');
-          const start = workflow.indexOf('      - name: Apply partner surname and initial matcher\n');
-          const end = workflow.indexOf('      - name: Book tee\n', start);
-          if (start !== -1 && end !== -1) {
-            workflow = workflow.slice(0, start) + workflow.slice(end);
+          const patchStart = workflow.indexOf('      - name: Apply partner surname and initial matcher\n');
+          const bookStart = workflow.indexOf('      - name: Book tee\n', patchStart);
+          if (patchStart !== -1) {
+            if (bookStart === -1) throw new Error('Found runtime matcher step but not the Book tee step.');
+            workflow = workflow.slice(0, patchStart) + workflow.slice(bookStart);
             fs.writeFileSync(workflowFile, workflow);
           }
           NODE
 
           rm .github/workflows/promote-partner-matcher.yml
+
+      - name: Validate changed files
+        shell: bash
+        run: |
+          grep -q 'const initialMatches = \[\];' scripts/book-tee.mjs
+          grep -q 'surnameIndex' scripts/book-tee.mjs
+          ! grep -q 'Apply partner surname and initial matcher' .github/workflows/book-wrexham-tee.yml
+          test ! -e .github/workflows/promote-partner-matcher.yml
+          node --check scripts/book-tee.mjs
 
       - name: Commit permanent source change
         shell: bash
