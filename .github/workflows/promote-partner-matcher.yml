@@ -1,0 +1,101 @@
+name: Promote partner matcher permanently
+
+on:
+  push:
+    paths:
+      - .github/workflows/promote-partner-matcher.yml
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Apply permanent matcher and clean workflow
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const scriptFile = 'scripts/book-tee.mjs';
+          let source = fs.readFileSync(scriptFile, 'utf8');
+          const oldFunction = `async function findPartnerResult(page, partnerName, mode) {
+            const links = await page.locator('a[href*="addpartner="]').all();
+            const target = normalizeHumanText(partnerName);
+            const targetParts = target.split(" ").filter(Boolean);
+
+            for (const link of links) {
+              if (!(await link.isVisible().catch(() => false))) continue;
+              const text = normalizeHumanText(await controlText(link));
+              if (mode === "exact" && text === target) return link;
+              if (mode === "matching-name" && (text === target || text.startsWith(\`${target} \`))) return link;
+              if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
+              if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
+            }
+
+            return null;
+          }`;
+          const newFunction = `async function findPartnerResult(page, partnerName, mode) {
+            const links = await page.locator('a[href*="addpartner="]').all();
+            const target = normalizeHumanText(partnerName);
+            const targetParts = target.split(" ").filter(Boolean);
+            const firstName = targetParts[0] || "";
+            const surname = targetParts.at(-1) || "";
+            const initial = firstName[0] || "";
+            const initialMatches = [];
+
+            for (const link of links) {
+              if (!(await link.isVisible().catch(() => false))) continue;
+              const text = normalizeHumanText(await controlText(link));
+              if (mode === "exact" && text === target) return link;
+              if (mode === "matching-name" && (text === target || text.startsWith(\`${target} \`))) return link;
+              if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
+
+              if (mode === "matching-name" && surname && initial) {
+                const textParts = text.split(" ").filter(Boolean);
+                const hasInitial = textParts.some((part) => part === initial || part.startsWith(initial));
+                if (textParts.includes(surname) && hasInitial) initialMatches.push(link);
+              }
+
+              if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
+            }
+
+            if (initialMatches.length === 1) return initialMatches[0];
+            return null;
+          }`;
+
+          if (!source.includes(oldFunction)) {
+            if (!source.includes('const initialMatches = [];')) {
+              throw new Error('Expected findPartnerResult implementation was not found.');
+            }
+          } else {
+            source = source.replace(oldFunction, newFunction);
+            fs.writeFileSync(scriptFile, source);
+          }
+
+          const workflowFile = '.github/workflows/book-wrexham-tee.yml';
+          let workflow = fs.readFileSync(workflowFile, 'utf8');
+          const start = workflow.indexOf('      - name: Apply partner surname and initial matcher\n');
+          const end = workflow.indexOf('      - name: Book tee\n', start);
+          if (start !== -1 && end !== -1) {
+            workflow = workflow.slice(0, start) + workflow.slice(end);
+            fs.writeFileSync(workflowFile, workflow);
+          }
+          NODE
+
+          rm .github/workflows/promote-partner-matcher.yml
+
+      - name: Commit permanent source change
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/book-tee.mjs .github/workflows/book-wrexham-tee.yml .github/workflows/promote-partner-matcher.yml
+          git commit -m "Promote surname and initial partner matching"
+          git push
