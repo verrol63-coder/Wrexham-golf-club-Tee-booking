@@ -92,6 +92,66 @@ jobs:
         shell: bash
         run: npx playwright install --with-deps chromium
 
+      - name: Apply partner surname and initial matcher
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'scripts/book-tee.mjs';
+          const source = fs.readFileSync(file, 'utf8');
+          const oldFunction = `async function findPartnerResult(page, partnerName, mode) {
+            const links = await page.locator('a[href*="addpartner="]').all();
+            const target = normalizeHumanText(partnerName);
+            const targetParts = target.split(" ").filter(Boolean);
+
+            for (const link of links) {
+              if (!(await link.isVisible().catch(() => false))) continue;
+              const text = normalizeHumanText(await controlText(link));
+              if (mode === "exact" && text === target) return link;
+              if (mode === "matching-name" && (text === target || text.startsWith(\`${target} \`))) return link;
+              if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
+              if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
+            }
+
+            return null;
+          }`;
+          const newFunction = `async function findPartnerResult(page, partnerName, mode) {
+            const links = await page.locator('a[href*="addpartner="]').all();
+            const target = normalizeHumanText(partnerName);
+            const targetParts = target.split(" ").filter(Boolean);
+            const firstName = targetParts[0] || "";
+            const surname = targetParts.at(-1) || "";
+            const initial = firstName[0] || "";
+            const initialMatches = [];
+
+            for (const link of links) {
+              if (!(await link.isVisible().catch(() => false))) continue;
+              const text = normalizeHumanText(await controlText(link));
+              if (mode === "exact" && text === target) return link;
+              if (mode === "matching-name" && (text === target || text.startsWith(\`${target} \`))) return link;
+              if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
+
+              if (mode === "matching-name" && surname && initial) {
+                const textParts = text.split(" ").filter(Boolean);
+                const hasInitial = textParts.some((part) => part === initial || part.startsWith(initial));
+                if (textParts.includes(surname) && hasInitial) initialMatches.push(link);
+              }
+
+              if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
+            }
+
+            if (initialMatches.length === 1) return initialMatches[0];
+            return null;
+          }`;
+
+          if (!source.includes(oldFunction)) {
+            throw new Error('Expected findPartnerResult implementation was not found; refusing an unsafe replacement.');
+          }
+
+          fs.writeFileSync(file, source.replace(oldFunction, newFunction));
+          console.log('Applied surname-and-initial partner matching hotfix.');
+          NODE
+
       - name: Book tee
         shell: bash
         run: npm run book
