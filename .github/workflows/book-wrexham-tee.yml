@@ -2,164 +2,106 @@ name: Book Wrexham Sunday tee
 
 on:
   schedule:
-        # GitHub schedules use UTC and are NOT guaranteed to fire on time - a
-        # scheduled run on 2026-07-12 fired at 21:10 BST instead of 18:00 BST,
-        # over 3 hours late, causing both preferred tee times to be taken
-        # before the bot even logged in. Triggering much earlier (13:00 UTC /
-        # 14:00 BST) gives a large buffer: even a multi-hour GitHub delay
-        # should still land well before the 18:59 BST login target. The
-        # script's own internal clock-wait (WAIT_FOR_LOGIN/WAIT_FOR_1900)
-        # handles the precise timing once the job is actually running.
-        - cron: "0 13 * * 0"
-  workflow_dispatch:
-    inputs:
-      target_date:
-        description: "Optional target date, YYYY-MM-DD. Blank means the Sunday 7 days ahead for scheduled Sunday runs."
-        required: false
-        type: string
-      dry_run:
-        description: "Run without submitting the final booking"
-        required: true
-        default: "false"
-        type: choice
-        options:
-          - "false"
-          - "true"
-
-permissions:
-  contents: read
-
-concurrency:
-  group: wrexham-sunday-tee-booking
-  cancel-in-progress: true
-
-jobs:
-  book:
-    runs-on: ubuntu-latest
-    timeout-minutes: 355
-    env:
-      TZ: Europe/London
-      BOOKING_URL: https://www.wrexhamgolfclub.co.uk/memberbooking/
-      LOGIN_URL: https://www.wrexhamgolfclub.co.uk/login.php
-      PRIMARY_TEE_TIME: "07:50"
-      SECONDARY_TEE_TIME: "08:30"
-      FALLBACK_WINDOW_START: "07:00"
-      FALLBACK_WINDOW_END: "09:30"
-      PLAYER_NAMES: "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckley"
-      COURSE_ID: "779"
-      GROUP_ID: "1"
-      REQUIRE_BOOKING_WINDOW: "false"
-      BOOKING_WEEKDAYS: "Sun"
-      TARGET_DAYS_AHEAD: "7"
-      WAIT_FOR_LOGIN: "true"
-      LOGIN_AT: "18:59"
-      WAIT_FOR_1900: "true"
-      TARGET_DATE: ${{ github.event.inputs.target_date || '' }}
-      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
-      IG_MEMBER_ID: ${{ secrets.IG_MEMBER_ID }}
-      IG_PIN: ${{ secrets.IG_PIN }}
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 1
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Show runtime versions
-        shell: bash
-        run: |
-          node --version
-          npm --version
-
-      - name: Install dependencies
-        shell: bash
-        run: npm ci
-
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
-
-      - name: Install Chromium
-        shell: bash
-        run: npx playwright install --with-deps chromium
-
-      - name: Apply partner surname and initial matcher
-        shell: bash
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const file = 'scripts/book-tee.mjs';
-          const source = fs.readFileSync(file, 'utf8');
-          const oldFunction = `async function findPartnerResult(page, partnerName, mode) {
-            const links = await page.locator('a[href*="addpartner="]').all();
-            const target = normalizeHumanText(partnerName);
-            const targetParts = target.split(" ").filter(Boolean);
-
-            for (const link of links) {
-              if (!(await link.isVisible().catch(() => false))) continue;
-              const text = normalizeHumanText(await controlText(link));
-              if (mode === "exact" && text === target) return link;
-              if (mode === "matching-name" && (text === target || text.startsWith(\`${target} \`))) return link;
-              if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
-              if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
-            }
-
-            return null;
-          }`;
-          const newFunction = `async function findPartnerResult(page, partnerName, mode) {
-            const links = await page.locator('a[href*="addpartner="]').all();
-            const target = normalizeHumanText(partnerName);
-            const targetParts = target.split(" ").filter(Boolean);
-            const firstName = targetParts[0] || "";
-            const surname = targetParts.at(-1) || "";
-            const initial = firstName[0] || "";
-            const initialMatches = [];
-
-            for (const link of links) {
-              if (!(await link.isVisible().catch(() => false))) continue;
-              const text = normalizeHumanText(await controlText(link));
-              if (mode === "exact" && text === target) return link;
-              if (mode === "matching-name" && (text === target || text.startsWith(\`${target} \`))) return link;
-              if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
-
-              if (mode === "matching-name" && surname && initial) {
-                const textParts = text.split(" ").filter(Boolean);
-                const hasInitial = textParts.some((part) => part === initial || part.startsWith(initial));
-                if (textParts.includes(surname) && hasInitial) initialMatches.push(link);
-              }
-
-              if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
-            }
-
-            if (initialMatches.length === 1) return initialMatches[0];
-            return null;
-          }`;
-
-          if (!source.includes(oldFunction)) {
-            throw new Error('Expected findPartnerResult implementation was not found; refusing an unsafe replacement.');
-          }
-
-          fs.writeFileSync(file, source.replace(oldFunction, newFunction));
-          console.log('Applied surname-and-initial partner matching hotfix.');
-          NODE
-
-      - name: Book tee
-        shell: bash
-        run: npm run book
-
-      - name: Upload run artifacts
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: booking-run-artifacts
-          path: artifacts/
-          if-no-files-found: ignore
+          # GitHub schedules use UTC and are NOT guaranteed to fire on time - a
+                  # scheduled run on 2026-07-12 fired at 21:10 BST instead of 18:00 BST,
+                          # over 3 hours late, causing both preferred tee times to be taken
+                                  # before the bot even logged in. Triggering much earlier (13:00 UTC /
+                                          # 14:00 BST) gives a large buffer: even a multi-hour GitHub delay
+                                                  # should still land well before the 18:59 BST login target. The
+                                                          # script's own internal clock-wait (WAIT_FOR_LOGIN/WAIT_FOR_1900)
+                                                                  # handles the precise timing once the job is actually running.
+                                                                          - cron: "0 13 * * 0"
+                                                                            workflow_dispatch:
+                                                                                inputs:
+                                                                                      target_date:
+                                                                                              description: "Optional target date, YYYY-MM-DD. Blank means the Sunday 7 days ahead for scheduled Sunday runs."
+                                                                                                      required: false
+                                                                                                              type: string
+                                                                                                                    dry_run:
+                                                                                                                            description: "Run without submitting the final booking"
+                                                                                                                                    required: true
+                                                                                                                                            default: "false"
+                                                                                                                                                    type: choice
+                                                                                                                                                            options:
+                                                                                                                                                                      - "false"
+                                                                                                                                                                                - "true"
+                                                                                                                                                                                
+                                                                                                                                                                                permissions:
+                                                                                                                                                                                  contents: read
+                                                                                                                                                                                  
+                                                                                                                                                                                  concurrency:
+                                                                                                                                                                                    group: wrexham-sunday-tee-booking
+                                                                                                                                                                                      # An in-progress run (e.g. the live Sunday scheduled booking attempt) must
+                                                                                                                                                                                        # never be killed by a later manual/test trigger - queue instead of cancel.
+                                                                                                                                                                                          cancel-in-progress: false
+                                                                                                                                                                                          
+                                                                                                                                                                                          jobs:
+                                                                                                                                                                                            book:
+                                                                                                                                                                                                runs-on: ubuntu-latest
+                                                                                                                                                                                                    timeout-minutes: 355
+                                                                                                                                                                                                        env:
+                                                                                                                                                                                                              TZ: Europe/London
+                                                                                                                                                                                                                    BOOKING_URL: https://www.wrexhamgolfclub.co.uk/memberbooking/
+                                                                                                                                                                                                                          LOGIN_URL: https://www.wrexhamgolfclub.co.uk/login.php
+                                                                                                                                                                                                                                PRIMARY_TEE_TIME: "07:50"
+                                                                                                                                                                                                                                      SECONDARY_TEE_TIME: "08:30"
+                                                                                                                                                                                                                                            FALLBACK_WINDOW_START: "07:00"
+                                                                                                                                                                                                                                                  FALLBACK_WINDOW_END: "09:30"
+                                                                                                                                                                                                                                                        PLAYER_NAMES: "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckley"
+                                                                                                                                                                                                                                                              COURSE_ID: "779"
+                                                                                                                                                                                                                                                                    GROUP_ID: "1"
+                                                                                                                                                                                                                                                                          REQUIRE_BOOKING_WINDOW: "false"
+                                                                                                                                                                                                                                                                                BOOKING_WEEKDAYS: "Sun"
+                                                                                                                                                                                                                                                                                      TARGET_DAYS_AHEAD: "7"
+                                                                                                                                                                                                                                                                                            WAIT_FOR_LOGIN: "true"
+                                                                                                                                                                                                                                                                                                  LOGIN_AT: "18:59"
+                                                                                                                                                                                                                                                                                                        WAIT_FOR_1900: "true"
+                                                                                                                                                                                                                                                                                                              TARGET_DATE: ${{ github.event.inputs.target_date || '' }}
+                                                                                                                                                                                                                                                                                                                    DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+                                                                                                                                                                                                                                                                                                                          IG_MEMBER_ID: ${{ secrets.IG_MEMBER_ID }}
+                                                                                                                                                                                                                                                                                                                                IG_PIN: ${{ secrets.IG_PIN }}
+                                                                                                                                                                                                                                                                                                                                
+                                                                                                                                                                                                                                                                                                                                    steps:
+                                                                                                                                                                                                                                                                                                                                          - name: Check out repository
+                                                                                                                                                                                                                                                                                                                                                  uses: actions/checkout@v7
+                                                                                                                                                                                                                                                                                                                                                          with:
+                                                                                                                                                                                                                                                                                                                                                                    fetch-depth: 1
+                                                                                                                                                                                                                                                                                                                                                                    
+                                                                                                                                                                                                                                                                                                                                                                          - name: Set up Node.js
+                                                                                                                                                                                                                                                                                                                                                                                  uses: actions/setup-node@v6
+                                                                                                                                                                                                                                                                                                                                                                                          with:
+                                                                                                                                                                                                                                                                                                                                                                                                    node-version: "22"
+                                                                                                                                                                                                                                                                                                                                                                                                              cache: npm
+                                                                                                                                                                                                                                                                                                                                                                                                              
+                                                                                                                                                                                                                                                                                                                                                                                                                    - name: Show runtime versions
+                                                                                                                                                                                                                                                                                                                                                                                                                            shell: bash
+                                                                                                                                                                                                                                                                                                                                                                                                                                    run: |
+                                                                                                                                                                                                                                                                                                                                                                                                                                              node --version
+                                                                                                                                                                                                                                                                                                                                                                                                                                                        npm --version
+                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+                                                                                                                                                                                                                                                                                                                                                                                                                                                              - name: Install dependencies
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                      shell: bash
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                              run: npm ci
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                              
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    - name: Cache Playwright browsers
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            id: playwright-cache
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    uses: actions/cache@v4
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            with:
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      path: ~/.cache/ms-playwright
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      - name: Install Chromium
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              shell: bash
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      run: npx playwright install --with-deps chromium
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            - name: Book tee
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    shell: bash
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            run: npm run book
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  - name: Upload run artifacts
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          if: always()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  uses: actions/upload-artifact@v7
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          with:
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    name: booking-run-artifacts
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              path: artifacts/
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        if-no-files-found: ignore
