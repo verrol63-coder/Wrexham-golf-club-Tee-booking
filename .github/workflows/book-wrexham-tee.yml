@@ -2,15 +2,15 @@ name: Book Wrexham Sunday tee
 
 on:
   schedule:
-        # GitHub schedules use UTC and are NOT guaranteed to fire on time - a
-        # scheduled run on 2026-07-12 fired at 21:10 BST instead of 18:00 BST,
-        # over 3 hours late, causing both preferred tee times to be taken
-        # before the bot even logged in. Triggering much earlier (13:00 UTC /
-        # 14:00 BST) gives a large buffer: even a multi-hour GitHub delay
-        # should still land well before the 18:59 BST login target. The
-        # script's own internal clock-wait (WAIT_FOR_LOGIN/WAIT_FOR_1900)
-        # handles the precise timing once the job is actually running.
-        - cron: "0 13 * * 0"
+    # GitHub schedules use UTC and are NOT guaranteed to fire on time - a
+    # scheduled run on 2026-07-12 fired at 21:10 BST instead of 18:00 BST,
+    # over 3 hours late, causing both preferred tee times to be taken
+    # before the bot even logged in. Triggering much earlier (13:00 UTC /
+    # 14:00 BST) gives a large buffer: even a multi-hour GitHub delay
+    # should still land well before the 18:59 BST login target. The
+    # script's own internal clock-wait (WAIT_FOR_LOGIN/WAIT_FOR_1900)
+    # handles the precise timing once the job is actually running.
+    - cron: "0 13 * * 0"
   workflow_dispatch:
     inputs:
       target_date:
@@ -104,4 +104,4 @@ jobs:
         with:
           name: booking-run-artifacts
           path: artifacts/
-          if-no-files-found: ignore                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                if-no-files-found: ignore
+          if-no-files-found: ignore
