@@ -657,6 +657,10 @@ async function findPartnerResult(page, partnerName, mode) {
   const links = await page.locator('a[href*="addpartner="]').all();
   const target = normalizeHumanText(partnerName);
   const targetParts = target.split(" ").filter(Boolean);
+  const firstName = targetParts[0] || "";
+  const surname = targetParts.at(-1) || "";
+  const initial = firstName[0] || "";
+  const initialMatches = [];
 
   for (const link of links) {
     if (!(await link.isVisible().catch(() => false))) continue;
@@ -664,9 +668,20 @@ async function findPartnerResult(page, partnerName, mode) {
     if (mode === "exact" && text === target) return link;
     if (mode === "matching-name" && (text === target || text.startsWith(`${target} `))) return link;
     if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
+
+    if (mode === "matching-name" && surname && initial) {
+      const textParts = text.split(" ").filter(Boolean);
+      const surnameIndex = textParts.indexOf(surname);
+      const hasInitial = textParts.some((part, index) => index !== surnameIndex && part[0] === initial);
+      if (surnameIndex !== -1 && hasInitial) initialMatches.push(link);
+    }
+
     if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
   }
 
+  // If several members share a surname, only trust the initial-based match when
+  // it's unambiguous; otherwise fall through and let the caller retry another way.
+  if (initialMatches.length === 1) return initialMatches[0];
   return null;
 }
 
