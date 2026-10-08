@@ -279,7 +279,13 @@ async function attemptTime(page, gridUrl, time) {
   await page.waitForLoadState("domcontentloaded").catch(() => {});
   await saveScreenshot(page, `submitted-${time.replace(":", "")}.png`);
 
-  const finalText = await confirmationCheckText(page);
+  const finalText = await pollUntilText(
+    () => confirmationCheckText(page),
+    (text) =>
+      isConfirmationText(text) ||
+      isProvisionalBookingText(text) ||
+      /payment|card number|checkout|pay now/i.test(text)
+  );
   if (isProvisionalBookingText(finalText)) {
     console.log(`Provisional booking held for ${time}; entering playing partner details.`);
     await completePartnerDetails(page, time, config.players);
@@ -499,7 +505,10 @@ async function completePartnerDetails(page, time, players) {
     await fillPartnerDetailPage(page, partnerName, playerNumber);
     await returnToProvisionalBookingIfNeeded(page);
 
-    currentText = await bodyText(page);
+    currentText = await pollUntilText(
+      () => bodyText(page),
+      (text) => playerNameLooksPresent(text, partnerName)
+    );
     if (!playerNameLooksPresent(currentText, partnerName)) {
       await savePageDiagnostics(page, `player-${playerNumber}-not-saved`).catch(() => {});
       throw new Error(`Entered Player ${playerNumber} as ${partnerName}, but the booking page did not show that name afterward.`);
@@ -980,6 +989,22 @@ async function hasText(page, pattern) {
 
 async function bodyText(page) {
   return page.locator("body").innerText({ timeout: 5000 }).catch(() => "");
+}
+
+// Several site actions (submitting the booking form, selecting a partner
+// suggestion) update the page inline via AJAX rather than a full navigation,
+// so page.waitForLoadState("domcontentloaded") returns immediately without
+// actually waiting for the update. A single text check right after can race
+// the response and see stale content. Poll briefly for the expected state
+// before giving up, instead of judging success/failure off one snapshot.
+async function pollUntilText(fetchText, predicate, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  let text = await fetchText();
+  while (!predicate(text) && Date.now() < deadline) {
+    await sleep(300);
+    text = await fetchText();
+  }
+  return text;
 }
 
 async function isRegistrationPage(page, body = "") {
