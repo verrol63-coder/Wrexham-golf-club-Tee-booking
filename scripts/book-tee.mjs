@@ -125,7 +125,7 @@ async function main() {
     }
 
     for (const time of candidateTimes) {
-      const result = await attemptTime(page, gridUrl, time);
+      const result = await attemptTimeWithRetry(page, gridUrl, time);
       if (result === "booked" || result === "dry-run") {
         return;
       }
@@ -152,7 +152,7 @@ async function main() {
       } else {
         console.log(`Fallback candidates, nearest to primary time first: ${fallbackTimes.join(", ")}`);
         for (const time of fallbackTimes) {
-          const result = await attemptTime(page, gridUrl, time);
+          const result = await attemptTimeWithRetry(page, gridUrl, time);
           if (result === "booked" || result === "dry-run") {
             return;
           }
@@ -312,8 +312,33 @@ async function attemptTime(page, gridUrl, time) {
     throw new Error("A payment screen appeared, but this member booking should require no payment. Stopping.");
   }
 
+  // Log a raw text sample directly to the run log (not just to the artifact
+  // diagnostics file), since the diagnostics ZIP is not always reachable from
+  // every environment that reads these logs. A known, previously-seen notice
+  // ("you already have a teetime booked for this day") is checked explicitly
+  // since confirmationCheckText() strips it as noise before pattern-matching,
+  // so it would otherwise vanish without a trace here.
+  const rawText = await bodyText(page);
+  const hasExistingBookingNotice = /you\s+already\s+have\s+a\s+teetime\s+booked\s+for\s+this\s+day/i.test(rawText);
+  console.log(
+    `Unclear result for ${time}. Existing-booking notice present: ${hasExistingBookingNotice}. ` +
+      `Raw page text (first 600 chars): ${rawText.slice(0, 600).replace(/\s+/g, " ").trim()}`
+  );
   await savePageDiagnostics(page, `unclear-result-${time.replace(":", "")}`).catch(() => {});
-  throw new Error(`Clicked the booking submit button for ${time}, but no clear confirmation text was found afterward. Treating as failed rather than assuming success - see diagnostics.`);
+  return "unclear";
+}
+
+// Submission can land in an unrecognized page state on a transient glitch
+// (and the site's own grid prevents a duplicate booking of an already-booked
+// slot, so retrying is safe either way: if the first attempt actually
+// succeeded, the retry will see the slot as unavailable and move on). Give
+// an "unclear" result one retry before treating the slot as failed.
+async function attemptTimeWithRetry(page, gridUrl, time) {
+  const result = await attemptTime(page, gridUrl, time);
+  if (result !== "unclear") return result;
+
+  console.log(`Result for ${time} was unclear; retrying once before giving up on this slot.`);
+  return attemptTime(page, gridUrl, time);
 }
 
 // Looks at every inline "Book" link currently rendered on the grid and returns
