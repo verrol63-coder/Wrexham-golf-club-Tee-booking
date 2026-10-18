@@ -567,7 +567,18 @@ async function fillPartnerDetailPage(page, partnerName, playerNumber) {
   }
 
   const searchTerm = partnerSearchTerm(partnerName);
-  console.log(`Searching partner surname prefix for Player ${playerNumber}: ${searchTerm}.`);
+
+  // Retrying the search itself is safe even though the tee time and this
+  // player's slot are already held: nothing here is a booking-affecting
+  // action, just typing into the search box and reading back the results.
+  // So a transient glitch on the first attempt (slow live-filter render, a
+  // stale result list) can be retried with no risk of a duplicate booking.
+  let matched = false;
+  for (let attempt = 1; attempt <= 2 && !matched; attempt += 1) {
+    if (attempt > 1) {
+      console.log(`Retrying partner search for Player ${playerNumber} (attempt ${attempt}).`);
+    }
+    console.log(`Searching partner surname prefix for Player ${playerNumber}: ${searchTerm}.`);
     // The site's partner search box (class "keypartner") filters its member
     // list live as real keystrokes are typed. Playwright's fill() sets the
     // value directly without dispatching per-character key events, so the
@@ -575,11 +586,14 @@ async function fillPartnerDetailPage(page, partnerName, playerNumber) {
     // on screen (confirmed from a real failed run's diagnostics). Type the
     // term character-by-character so the live filter actually fires.
     await input.click();
-  await input.fill("").catch(() => {});
-  await input.pressSequentially(searchTerm, { delay: 80 });
-  await sleep(600);
+    await input.fill("").catch(() => {});
+    await input.pressSequentially(searchTerm, { delay: 80 });
+    await sleep(600);
 
-  if (!(await selectPartnerSuggestion(page, partnerName))) {
+    matched = await selectPartnerSuggestion(page, partnerName);
+  }
+
+  if (!matched) {
     // Log directly to the run log, not just to the artifact diagnostics file,
     // since the diagnostics ZIP is not always reachable from every
     // environment that reads these logs. Lists every candidate the search
@@ -645,6 +659,19 @@ async function selectPartnerSuggestion(page, partnerName) {
   const exactSuggestion = await findPartnerResult(page, partnerName, "exact");
   if (exactSuggestion) {
     await exactSuggestion.click();
+    return true;
+  }
+
+  // The live filter (typed character-by-character above) already narrows the
+  // list as it goes; check it leniently before reaching for a generic
+  // "search/find/submit" control below. That control is matched by text/href
+  // anywhere on the page, not scoped to the partner picker, so prefer a
+  // lenient match against results we already know are live-filtered over
+  // risking a click on an unrelated page control.
+  const liveFilteredMatch = await findPartnerResult(page, partnerName, "matching-name");
+  if (liveFilteredMatch) {
+    console.log(`Selecting live-filtered member result for ${partnerName}.`);
+    await liveFilteredMatch.click();
     return true;
   }
 
