@@ -580,6 +580,18 @@ async function fillPartnerDetailPage(page, partnerName, playerNumber) {
   await sleep(600);
 
   if (!(await selectPartnerSuggestion(page, partnerName))) {
+    // Log directly to the run log, not just to the artifact diagnostics file,
+    // since the diagnostics ZIP is not always reachable from every
+    // environment that reads these logs. Lists every candidate the search
+    // actually returned (or confirms the list was empty) so a real site
+    // change can be told apart from a matching-logic bug without a download.
+    const candidateTexts = await page.locator('a[href*="addpartner="]').allTextContents().catch(() => []);
+    const rawText = await bodyText(page);
+    console.log(
+      `No match for Player ${playerNumber} (${partnerName}) using search term "${partnerSearchTerm(partnerName)}". ` +
+        `Candidate results (${candidateTexts.length}): ${JSON.stringify(candidateTexts.slice(0, 30))}. ` +
+        `Raw page text (first 600 chars): ${rawText.slice(0, 600).replace(/\s+/g, " ").trim()}`
+    );
     await savePageDiagnostics(page, `player-${playerNumber}-partner-not-found`).catch(() => {});
     throw new Error(`Could not select a matching member record for Player ${playerNumber}: ${partnerName}.`);
   }
