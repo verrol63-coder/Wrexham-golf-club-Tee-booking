@@ -44,7 +44,7 @@ jobs:
       BOOKING_URL: https://www.wrexhamgolfclub.co.uk/memberbooking/
       LOGIN_URL: https://www.wrexhamgolfclub.co.uk/login.php
       PRIMARY_TEE_TIME: "08:20"
-      SECONDARY_TEE_TIME: "08:30"
+      SECONDARY_TEE_TIME: "08:50"
       FALLBACK_WINDOW_START: "07:00"
       FALLBACK_WINDOW_END: "09:30"
       PLAYER_NAMES: "Verrol Skerritt|Richard Roberts|Dean Holmes|Eddie Buckley"
