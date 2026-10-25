@@ -1,5 +1,5 @@
-Dry run timestamp UTC: 2026-10-25T20:08:24Z
-Trigger SHA: b1892b7e46bdad2687c1383248b455a7246db141
+Dry run timestamp UTC: 2026-10-25T20:09:13Z
+Trigger SHA: e3c831c958500df3679fd3aa009de2e68eb67b91
 Exit status: 1
 
 Result: FAILURE - dry run did not reach the booking screen. See sanitized log excerpt below.
@@ -14,9 +14,9 @@ Preferred times: 17:40, 17:50
 Players: Verrol Skerritt, Richard Roberts, Dean Holmes, Eddie Buckley
 DRY_RUN=true: final submit will not be clicked.
 Tee Time Booking Code of Conduct gate detected; accepting it.
-[2026-10-25T20:08:23.905Z] Trying 17:40 on the live grid.
+[2026-10-25T20:09:12.890Z] Trying 17:40 on the live grid.
 17:40 has no visible "Book" link on the grid - most likely already taken.
-[2026-10-25T20:08:23.917Z] Trying 17:50 on the live grid.
+[2026-10-25T20:09:12.903Z] Trying 17:50 on the live grid.
 17:50 has no visible "Book" link on the grid - most likely already taken.
 node:internal/modules/run_main:123
     triggerUncaughtException(
