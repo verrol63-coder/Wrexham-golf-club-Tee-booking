@@ -110,24 +110,45 @@ async function main() {
     // DIAGNOSTIC: capture what the tee sheet grid actually looks like before release.
     await captureGridDiagnostics(page, "grid-before-release");
 
+    let pageIsOnGrid = true;
+
     if (config.waitFor1900) {
       await waitUntilLocalClock("19:00", "booking window");
 
       // Re-load the grid fresh right after release, since slots may only render as
       // live, clickable links once the booking window actually opens.
+      console.log(`[${ts()}] Reloading grid immediately after release.`);
       await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
       await dismissCookieBanner(page);
       if (await acceptCodeOfConductIfPresent(page)) {
         await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
         await dismissCookieBanner(page);
       }
-      await captureGridDiagnostics(page, "grid-after-release");
+      // Best-effort only - fire without awaiting so a slow screenshot can never
+      // cost us time in the window that matters most.
+      captureGridDiagnostics(page, "grid-after-release").catch(() => {});
+      pageIsOnGrid = true;
     }
 
+    // Each candidate/fallback time gets its own try/catch: previously a single
+    // thrown error anywhere in this loop (an unexpected page state, a DOM
+    // timing glitch) aborted the ENTIRE run - skipping the secondary time and
+    // the whole fallback window even when a real, bookable slot was still
+    // sitting there unclaimed. That is the most likely cause of recent
+    // failures and is now fixed: a failure on one slot just moves on.
     for (const time of candidateTimes) {
-      const result = await attemptTimeWithRetry(page, gridUrl, time);
-      if (result === "booked" || result === "dry-run") {
-        return;
+      try {
+        const result = await attemptTimeWithRetry(page, gridUrl, time, { freshGrid: !pageIsOnGrid });
+        if (result === "booked" || result === "dry-run") {
+          return;
+        }
+        pageIsOnGrid = result === "unavailable";
+      } catch (error) {
+        console.log(
+          `[${ts()}] Attempt for ${time} failed (${error.message}); moving on to the next candidate time instead of aborting the whole run.`
+        );
+        await saveFailureArtifacts(page, error).catch(() => {});
+        pageIsOnGrid = false;
       }
     }
 
@@ -142,6 +163,7 @@ async function main() {
       );
       await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
       await dismissCookieBanner(page);
+      pageIsOnGrid = true;
 
       const fallbackTimes = (
         await discoverAvailableTimes(page, config.fallbackWindowStart, config.fallbackWindowEnd)
@@ -152,9 +174,18 @@ async function main() {
       } else {
         console.log(`Fallback candidates, nearest to primary time first: ${fallbackTimes.join(", ")}`);
         for (const time of fallbackTimes) {
-          const result = await attemptTimeWithRetry(page, gridUrl, time);
-          if (result === "booked" || result === "dry-run") {
-            return;
+          try {
+            const result = await attemptTimeWithRetry(page, gridUrl, time, { freshGrid: !pageIsOnGrid });
+            if (result === "booked" || result === "dry-run") {
+              return;
+            }
+            pageIsOnGrid = result === "unavailable";
+          } catch (error) {
+            console.log(
+              `[${ts()}] Attempt for fallback slot ${time} failed (${error.message}); moving on to the next fallback slot.`
+            );
+            await saveFailureArtifacts(page, error).catch(() => {});
+            pageIsOnGrid = false;
           }
         }
       }
@@ -208,17 +239,20 @@ async function loginAsMember(page) {
   }
 }
 
-async function attemptTime(page, gridUrl, time) {
-  console.log(`Trying ${time} on the live grid.`);
+async function attemptTime(page, gridUrl, time, { freshGrid = true } = {}) {
+  console.log(`[${ts()}] Trying ${time} on the live grid.`);
 
-  // Always start from the plain grid for this attempt, in case a previous
-  // attempt left the page in a different state.
-  await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-  await dismissCookieBanner(page);
-
-  if (await acceptCodeOfConductIfPresent(page)) {
-    await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+  if (freshGrid) {
+    // Only re-navigate when the page isn't already known to be on the grid -
+    // every extra navigation costs real time in the seconds right after
+    // release, exactly when other members' sessions are racing for the slot.
+    await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
     await dismissCookieBanner(page);
+
+    if (await acceptCodeOfConductIfPresent(page)) {
+      await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+      await dismissCookieBanner(page);
+    }
   }
 
   await guardAgainstUnexpectedScreens(page, time);
@@ -243,7 +277,7 @@ async function attemptTime(page, gridUrl, time) {
     return "unavailable";
   }
 
-  console.log(`Clicking Book for ${time}.`);
+  console.log(`[${ts()}] Clicking Book for ${time}.`);
   await bookLink.click();
 
   // The site expands that row inline (rather than navigating to a new page), so
@@ -274,7 +308,7 @@ async function attemptTime(page, gridUrl, time) {
     return "dry-run";
   }
 
-  console.log(`Clicking the scoped submit button: Book teetime at ${time}.`);
+  console.log(`[${ts()}] Clicking the scoped submit button: Book teetime at ${time}.`);
   await submitButton.click();
   await page.waitForLoadState("domcontentloaded").catch(() => {});
   await saveScreenshot(page, `submitted-${time.replace(":", "")}.png`);
@@ -333,12 +367,15 @@ async function attemptTime(page, gridUrl, time) {
 // slot, so retrying is safe either way: if the first attempt actually
 // succeeded, the retry will see the slot as unavailable and move on). Give
 // an "unclear" result one retry before treating the slot as failed.
-async function attemptTimeWithRetry(page, gridUrl, time) {
-  const result = await attemptTime(page, gridUrl, time);
+async function attemptTimeWithRetry(page, gridUrl, time, { freshGrid = true } = {}) {
+  const result = await attemptTime(page, gridUrl, time, { freshGrid });
   if (result !== "unclear") return result;
 
-  console.log(`Result for ${time} was unclear; retrying once before giving up on this slot.`);
-  return attemptTime(page, gridUrl, time);
+  console.log(`[${ts()}] Result for ${time} was unclear; retrying once before giving up on this slot.`);
+  // Page state after an "unclear" result is unknown (we may be sat on a
+  // results/error page rather than the grid), so the retry always forces a
+  // fresh navigation regardless of what the caller passed in.
+  return attemptTime(page, gridUrl, time, { freshGrid: true });
 }
 
 // Looks at every inline "Book" link currently rendered on the grid and returns
@@ -910,10 +947,15 @@ async function waitUntilLocalClock(hhmm, label) {
     const now = londonNow();
     const minutes = now.hour * 60 + now.minute;
     if (minutes >= target.minutes) {
-      console.log(`${label} time reached in ${TIME_ZONE}: ${two(now.hour)}:${two(now.minute)}:${two(now.second)}.`);
+      console.log(`[${ts()}] ${label} time reached in ${TIME_ZONE}: ${two(now.hour)}:${two(now.minute)}:${two(now.second)}.`);
       return;
     }
-    await sleep(250);
+    // Poll coarsely while far from the target to avoid needless churn during a
+    // long wait, but switch to fine-grained polling in the final second so we
+    // cross the target with minimal overshoot - every extra millisecond here
+    // is a millisecond other members' sessions get a head start.
+    const secondsUntilTarget = target.minutes * 60 - (now.hour * 3600 + now.minute * 60 + now.second);
+    await sleep(secondsUntilTarget <= 1 ? 20 : 250);
   }
 
   throw new Error(`Waited for ${hhmm} Europe/London, but it did not arrive inside the maximum wait window.`);
@@ -1143,4 +1185,11 @@ function two(value) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Millisecond-precision timestamp for the handful of log lines in the
+// critical race window, so a future failure is diagnosable straight from the
+// GitHub Actions log view (no need to export anything).
+function ts() {
+  return new Date().toISOString();
 }
