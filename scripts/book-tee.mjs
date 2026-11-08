@@ -771,13 +771,29 @@ async function findPartnerResult(page, partnerName, mode) {
   const surname = targetParts.at(-1) || "";
   const initial = firstName[0] || "";
   const initialMatches = [];
+  let primaryMatch = null;
 
+  // Match on text content only here - do NOT gate candidates on isVisible()
+  // while scanning. isVisible() reports the instantaneous state with no
+  // waiting, unlike click(), which auto-waits for an element to become
+  // actionable. A real failed run confirmed this: the correct member was
+  // present in the result text (verified from that run's own diagnostics),
+  // but every candidate read as not yet visible at the exact instant this
+  // function ran, right after the result list had just been rendered.
   for (const link of links) {
-    if (!(await link.isVisible().catch(() => false))) continue;
     const text = normalizeHumanText(await controlText(link));
-    if (mode === "exact" && text === target) return link;
-    if (mode === "matching-name" && (text === target || text.startsWith(`${target} `))) return link;
-    if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
+    if (mode === "exact" && text === target) {
+      primaryMatch = link;
+      break;
+    }
+    if (mode === "matching-name" && (text === target || text.startsWith(`${target} `))) {
+      primaryMatch = link;
+      break;
+    }
+    if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) {
+      primaryMatch = link;
+      break;
+    }
 
     if (mode === "matching-name" && surname && initial) {
       const textParts = text.split(" ").filter(Boolean);
@@ -786,13 +802,26 @@ async function findPartnerResult(page, partnerName, mode) {
       if (surnameIndex !== -1 && hasInitial) initialMatches.push(link);
     }
 
-    if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) return link;
+    if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) {
+      primaryMatch = link;
+      break;
+    }
   }
 
   // If several members share a surname, only trust the initial-based match when
   // it's unambiguous; otherwise fall through and let the caller retry another way.
-  if (initialMatches.length === 1) return initialMatches[0];
-  return null;
+  const candidate = primaryMatch || (initialMatches.length === 1 ? initialMatches[0] : null);
+  if (!candidate) return null;
+
+  // Now actually wait for that specific candidate to become actionable,
+  // instead of trusting the earlier non-waiting snapshot. Resolves
+  // immediately if it's already visible, so this costs nothing in the
+  // common case.
+  const becameVisible = await candidate
+    .waitFor({ state: "visible", timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+  return becameVisible ? candidate : null;
 }
 
 async function clickPartnerDetailSubmit(page, playerNumber) {
