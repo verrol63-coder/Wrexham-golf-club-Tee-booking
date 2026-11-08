@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "book": "node scripts/book-tee.mjs",
-    "check": "node --check scripts/book-tee.mjs"
+    "check": "node --check scripts/book-tee.mjs && node --check scripts/lib/matching.mjs && node --check scripts/lib/time.mjs",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "playwright": "^1.54.0"

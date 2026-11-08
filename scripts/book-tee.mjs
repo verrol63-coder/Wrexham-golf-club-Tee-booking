@@ -2,6 +2,28 @@
 import { chromium } from "playwright";
 import fs from "node:fs/promises";
 import path from "node:path";
+import {
+  normalizeHumanText,
+  partnerSearchTerm,
+  firstInitialRangeLabel,
+  isConfirmationText,
+  isProvisionalBookingText,
+  playerNameLooksPresent,
+  allPartnerNamesPresent,
+  isPartnerDetailsComplete,
+  classifyPartnerCandidate,
+} from "./lib/matching.mjs";
+import {
+  two,
+  normalizeTime,
+  parseClock,
+  parseWeekdays,
+  parsePlayerNames,
+  parseOptionalInteger,
+  isoToDdMmYyyy,
+  escapeRegex,
+  isInBookingWindow,
+} from "./lib/time.mjs";
 
 const TIME_ZONE = "Europe/London";
 const ARTIFACT_DIR = "artifacts";
@@ -38,7 +60,7 @@ async function main() {
   await fs.mkdir(ARTIFACT_DIR, { recursive: true });
 
   const now = londonNow();
-  if (config.requireBookingWindow && !isInBookingWindow(now)) {
+  if (config.requireBookingWindow && !isInBookingWindow(now, config.bookingWeekdays)) {
     console.log(
       `Outside booking window in ${TIME_ZONE}: ${now.weekday} ${two(now.hour)}:${two(now.minute)}. Exiting without booking.`
     );
@@ -212,7 +234,7 @@ async function loginAsMember(page) {
   const memberField = page.locator("#memberid");
   const pinField = page.locator("#pin");
 
-  if (!(await memberField.isVisible({ timeout: 10000 }).catch(() => false))) {
+  if (!(await waitVisible(memberField, 10000))) {
     console.log("Member login form was not visible; continuing in case an existing session is active.");
     return;
   }
@@ -221,7 +243,7 @@ async function loginAsMember(page) {
   await pinField.fill(config.pin);
 
   const keepLoggedIn = page.locator('input[name="cachemid"]');
-  if (await keepLoggedIn.isVisible().catch(() => false)) {
+  if (await waitVisible(keepLoggedIn, 1000)) {
     await keepLoggedIn.check().catch(() => {});
   }
 
@@ -231,7 +253,7 @@ async function loginAsMember(page) {
   ]);
 
   const body = await bodyText(page);
-  if (/invalid|incorrect|try again|login required/i.test(body) && (await memberField.isVisible().catch(() => false))) {
+  if (/invalid|incorrect|try again|login required/i.test(body) && (await waitVisible(memberField, 1000))) {
     throw new Error("Member login did not succeed. Check IG_MEMBER_ID and IG_PIN secrets.");
   }
   if (await isRegistrationPage(page, body)) {
@@ -262,7 +284,7 @@ async function attemptTime(page, gridUrl, time, { freshGrid = true } = {}) {
   // this exact href means we can never click a different time's button, even
   // though many other "Book" links for other times are on the same page.
   const bookLink = page.locator(`a.inlineBooking[href*="book=${time}:00"]`).first();
-  const isBookable = await bookLink.isVisible({ timeout: 2000 }).catch(() => false);
+  const isBookable = await waitVisible(bookLink, 2000);
 
   if (!isBookable) {
     const stillTaken = await hasText(
@@ -412,8 +434,8 @@ async function findBookingSubmitButton(page, time, timeoutMs) {
   while (Date.now() < deadline) {
     const candidates = await page.locator("button, input[type='submit'], input[type='button'], a.btn, a.button").all();
     for (const candidate of candidates) {
-      if (!(await candidate.isVisible().catch(() => false))) continue;
-      if (label.test(await controlText(candidate))) return candidate;
+      if (!label.test(await controlText(candidate))) continue;
+      if (await waitVisible(candidate, 500)) return candidate;
     }
     await sleep(250);
   }
@@ -430,24 +452,14 @@ function confirmationCheckText(page) {
   );
 }
 
-function isConfirmationText(text) {
-  return /confirmed|booking reference|thank you for your booking|your booking is confirmed/i.test(text);
-}
-
-function isProvisionalBookingText(text) {
-  return /provisionally\s+reserved|enter\s+the\s+details\s+of\s+your\s+playing\s+partners|you\s+must\s+enter\s+the\s+names\s+of\s+your\s+playing\s+partners/i.test(
-    text
-  );
-}
-
 async function guardAgainstUnexpectedScreens(page, time) {
   const body = await bodyText(page);
 
-  if (await page.locator("#memberid, #pin").first().isVisible().catch(() => false)) {
+  if (await waitVisible(page.locator("#memberid, #pin").first(), 1000)) {
     throw new Error("The site returned to the member login page. The session may not have been retained.");
   }
 
-  if (await page.locator("#teeemail, #teepassword").first().isVisible().catch(() => false)) {
+  if (await waitVisible(page.locator("#teeemail, #teepassword").first(), 1000)) {
     throw new Error("The site showed the visitor tee-time login instead of the member booking flow.");
   }
 
@@ -481,7 +493,7 @@ async function setPlayerCount(page, count) {
   // exist in the DOM (one per bookable slot on the grid), so we must scope to the
   // one that's actually visible - i.e. the popup tied to the slot we just clicked.
   const radio = page.locator(`input[name="numslots"][value="${count}"]:visible`).first();
-  const isPresent = await radio.isVisible({ timeout: 3000 }).catch(() => false);
+  const isPresent = await waitVisible(radio, 3000);
   if (!isPresent) {
     console.log(`Could not find a visible numslots radio for ${count} players.`);
     return;
@@ -497,7 +509,6 @@ async function fillPlayerNames(page, players) {
 
   const candidateInputs = [];
   for (const input of visibleInputs) {
-    if (!(await input.isVisible().catch(() => false))) continue;
     const descriptor = [
       await input.getAttribute("name").catch(() => ""),
       await input.getAttribute("id").catch(() => ""),
@@ -508,7 +519,7 @@ async function fillPlayerNames(page, players) {
       .toLowerCase();
 
     if (/csrf|password|pin|email|phone|mobile|terms|note|comment/.test(descriptor)) continue;
-    if (/player|member|guest|name|partner|slot/.test(descriptor)) {
+    if (/player|member|guest|name|partner|slot/.test(descriptor) && (await waitVisible(input, 300))) {
       candidateInputs.push(input);
     }
   }
@@ -584,11 +595,11 @@ async function findEnterDetailsLink(page, playerNumber) {
   const rowLink = page
     .locator(`xpath=//*[normalize-space(.)="Player ${playerNumber}"]/following::a[contains(normalize-space(.), "Enter Details")][1]`)
     .first();
-  if (await rowLink.isVisible({ timeout: 1000 }).catch(() => false)) return rowLink;
+  if (await waitVisible(rowLink, 1000)) return rowLink;
 
   const links = await page.getByRole("link", { name: /enter details/i }).all();
   for (const link of links) {
-    if (await link.isVisible().catch(() => false)) return link;
+    if (await waitVisible(link, 500)) return link;
   }
 
   return null;
@@ -658,8 +669,6 @@ async function findPartnerInput(page) {
 
   let fallback = null;
   for (const candidate of candidates) {
-    if (!(await candidate.isVisible().catch(() => false))) continue;
-
     const descriptor = [
       await candidate.getAttribute("name").catch(() => ""),
       await candidate.getAttribute("id").catch(() => ""),
@@ -671,16 +680,20 @@ async function findPartnerInput(page) {
       .toLowerCase();
 
     if (/csrf|password|pin|email|phone|mobile|terms|note|comment|date|time/.test(descriptor)) continue;
-    if (/member|player|guest|name|partner|search/.test(descriptor)) return candidate;
+    if (/member|player|guest|name|partner|search/.test(descriptor)) {
+      if (await waitVisible(candidate, 500)) return candidate;
+      continue;
+    }
     fallback ??= candidate;
   }
 
-  return fallback;
+  if (fallback && (await waitVisible(fallback, 500))) return fallback;
+  return null;
 }
 
 async function openAnotherMemberPicker(page) {
   const anotherMember = page.getByRole("link", { name: /another member/i }).first();
-  if (!(await anotherMember.isVisible({ timeout: 1000 }).catch(() => false))) return;
+  if (!(await waitVisible(anotherMember, 1000))) return;
 
   await Promise.all([
     page.waitForLoadState("domcontentloaded").catch(() => {}),
@@ -744,7 +757,7 @@ async function selectFirstInitialRange(page, partnerName) {
   if (!label) return;
 
   const rangeLink = page.getByRole("link", { name: label }).first();
-  if (!(await rangeLink.isVisible({ timeout: 1000 }).catch(() => false))) return;
+  if (!(await waitVisible(rangeLink, 1000))) return;
 
   console.log(`Filtering member results to first-name range ${label}.`);
   await rangeLink.click().catch(() => {});
@@ -752,24 +765,11 @@ async function selectFirstInitialRange(page, partnerName) {
   await sleep(1500);
 }
 
-function firstInitialRangeLabel(partnerName) {
-  const first = String(partnerName || "").trim()[0]?.toUpperCase();
-  if (!first) return "";
-  if (first >= "A" && first <= "E") return "A - E";
-  if (first >= "F" && first <= "J") return "F - J";
-  if (first >= "K" && first <= "O") return "K - O";
-  if (first >= "P" && first <= "T") return "P - T";
-  if (first >= "U" && first <= "Z") return "U - Z";
-  return "";
-}
-
+// The actual matching rules live in lib/matching.mjs (classifyPartnerCandidate)
+// where they're unit tested directly - this function just iterates the live
+// DOM candidates and applies that pure classifier to each one's text.
 async function findPartnerResult(page, partnerName, mode) {
   const links = await page.locator('a[href*="addpartner="]').all();
-  const target = normalizeHumanText(partnerName);
-  const targetParts = target.split(" ").filter(Boolean);
-  const firstName = targetParts[0] || "";
-  const surname = targetParts.at(-1) || "";
-  const initial = firstName[0] || "";
   const initialMatches = [];
   let primaryMatch = null;
 
@@ -781,31 +781,13 @@ async function findPartnerResult(page, partnerName, mode) {
   // but every candidate read as not yet visible at the exact instant this
   // function ran, right after the result list had just been rendered.
   for (const link of links) {
-    const text = normalizeHumanText(await controlText(link));
-    if (mode === "exact" && text === target) {
+    const text = await controlText(link);
+    const { isMatch, isInitialCandidate } = classifyPartnerCandidate(text, partnerName, mode);
+    if (isMatch) {
       primaryMatch = link;
       break;
     }
-    if (mode === "matching-name" && (text === target || text.startsWith(`${target} `))) {
-      primaryMatch = link;
-      break;
-    }
-    if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) {
-      primaryMatch = link;
-      break;
-    }
-
-    if (mode === "matching-name" && surname && initial) {
-      const textParts = text.split(" ").filter(Boolean);
-      const surnameIndex = textParts.indexOf(surname);
-      const hasInitial = textParts.some((part, index) => index !== surnameIndex && part[0] === initial);
-      if (surnameIndex !== -1 && hasInitial) initialMatches.push(link);
-    }
-
-    if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) {
-      primaryMatch = link;
-      break;
-    }
+    if (isInitialCandidate) initialMatches.push(link);
   }
 
   // If several members share a surname, only trust the initial-based match when
@@ -817,11 +799,7 @@ async function findPartnerResult(page, partnerName, mode) {
   // instead of trusting the earlier non-waiting snapshot. Resolves
   // immediately if it's already visible, so this costs nothing in the
   // common case.
-  const becameVisible = await candidate
-    .waitFor({ state: "visible", timeout: 3000 })
-    .then(() => true)
-    .catch(() => false);
-  return becameVisible ? candidate : null;
+  return (await waitVisible(candidate, 3000)) ? candidate : null;
 }
 
 async function clickPartnerDetailSubmit(page, playerNumber) {
@@ -858,7 +836,7 @@ async function finishPartnerDetailsIfPresent(page, text, players) {
   if (!allPartnerNamesPresent(text, players)) return false;
 
   const finishLink = page.locator("a.finish, a[href*='redirectToHome=1']").filter({ hasText: /finish/i }).first();
-  if (!(await finishLink.isVisible({ timeout: 1000 }).catch(() => false))) {
+  if (!(await waitVisible(finishLink, 1000))) {
     console.log("All partner names are present, but no Finish link was visible.");
     return false;
   }
@@ -876,12 +854,13 @@ async function finishPartnerDetailsIfPresent(page, text, players) {
 async function findActionButton(page, labels, blockers) {
   const candidates = await page.locator("button, input[type='submit'], input[type='button'], a.btn, a.button, a").all();
   for (const candidate of candidates) {
-    if (!(await candidate.isVisible().catch(() => false))) continue;
     const text = await controlText(candidate);
     const href = `${await candidate.getAttribute("href").catch(() => "")}`;
     if (!text && !href) continue;
     if (blockers.test(text) || blockers.test(href)) continue;
-    if (labels.some((label) => label.test(text) || label.test(href))) return candidate;
+    if (labels.some((label) => label.test(text) || label.test(href)) && (await waitVisible(candidate, 500))) {
+      return candidate;
+    }
   }
   return null;
 }
@@ -898,44 +877,8 @@ async function controlText(locator) {
     .trim();
 }
 
-function isPartnerDetailsComplete(text, players) {
-  const namesPresent = allPartnerNamesPresent(text, players);
-  if (namesPresent && /successfully\s+entered\s+the\s+details\s+of\s+all\s+your\s+playing\s+partners/i.test(text)) return true;
-  return namesPresent && !/enter details|you must enter the names of your playing partners/i.test(text);
-}
-
-function allPartnerNamesPresent(text, players) {
-  return players.slice(1).every((name) => playerNameLooksPresent(text, name));
-}
-
-function playerNameLooksPresent(text, name) {
-  const normalizedText = normalizeHumanText(text);
-  const normalizedName = normalizeHumanText(name);
-  if (normalizedText.includes(normalizedName)) return true;
-
-  const parts = normalizedName.split(" ").filter(Boolean);
-  return parts.length > 1 && parts.every((part) => normalizedText.includes(part));
-}
-
-function normalizeHumanText(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function escapeRegex(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function safeLabel(value) {
   return normalizeHumanText(value).replace(/\s+/g, "-") || "player";
-}
-
-function partnerSearchTerm(name) {
-  const surname = String(name || "").trim().split(/\s+/).at(-1) || "";
-  const prefix = surname.replace(/[^a-z0-9]/gi, "").slice(0, 3);
-  return prefix || surname || name;
 }
 
 async function acceptCodeOfConductIfPresent(page) {
@@ -943,7 +886,7 @@ async function acceptCodeOfConductIfPresent(page) {
   // fresh session, with an exact link: text "I accept this code of conduct",
   // href "?action=accept", class "btn btn-success". Confirmed from real diagnostics.
   const acceptLink = page.getByRole("link", { name: "I accept this code of conduct" });
-  const isPresent = await acceptLink.isVisible({ timeout: 1000 }).catch(() => false);
+  const isPresent = await waitVisible(acceptLink, 1000);
   if (!isPresent) return false;
 
   console.log("Tee Time Booking Code of Conduct gate detected; accepting it.");
@@ -957,7 +900,7 @@ async function acceptCodeOfConductIfPresent(page) {
 async function dismissCookieBanner(page) {
   for (const name of [/accept/i, /agree/i, /close/i, /ok/i]) {
     const button = page.getByRole("button", { name }).first();
-    if (await button.isVisible({ timeout: 1000 }).catch(() => false)) {
+    if (await waitVisible(button, 300)) {
       await button.click().catch(() => {});
       return;
     }
@@ -1028,12 +971,6 @@ function addDaysIso(parts, days) {
   return `${future.year}-${two(future.month)}-${two(future.day)}`;
 }
 
-function isInBookingWindow(parts) {
-  if (!config.bookingWeekdays.includes(parts.weekdayIndex)) return false;
-  const minutes = parts.hour * 60 + parts.minute;
-  return minutes >= 18 * 60 + 30 && minutes <= 19 * 60 + 5;
-}
-
 function londonNow() {
   return londonParts(new Date());
 }
@@ -1063,59 +1000,6 @@ function londonParts(date) {
     minute: Number(parts.minute),
     second: Number(parts.second),
   };
-}
-
-function isoToDdMmYyyy(isoDate) {
-  const [year, month, day] = isoDate.split("-");
-  if (!year || !month || !day) throw new Error(`Invalid TARGET_DATE: ${isoDate}`);
-  return `${day}-${month}-${year}`;
-}
-
-function normalizeTime(value) {
-  const match = String(value || "").match(/^(\d{1,2}):?(\d{2})$/);
-  if (!match) return "";
-  return `${two(Number(match[1]))}:${match[2]}`;
-}
-
-function parseClock(value) {
-  const match = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) throw new Error(`Invalid clock time: ${value}`);
-  return {
-    hour: Number(match[1]),
-    minute: Number(match[2]),
-    minutes: Number(match[1]) * 60 + Number(match[2]),
-  };
-}
-
-function parseWeekdays(value) {
-  const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const indexes = String(value || "")
-    .split(/[|, ]+/)
-    .map((day) => day.trim())
-    .filter(Boolean)
-    .map((day) => names.findIndex((name) => name.toLowerCase() === day.slice(0, 3).toLowerCase()));
-
-  if (indexes.length === 0 || indexes.some((index) => index === -1)) {
-    throw new Error(`Invalid BOOKING_WEEKDAYS: ${value}`);
-  }
-
-  return indexes;
-}
-
-function parsePlayerNames(value) {
-  return String(value || "")
-    .split(/[|,;\r\n]+/)
-    .map((name) => name.trim())
-    .filter(Boolean);
-}
-
-function parseOptionalInteger(value) {
-  if (value === undefined || value === null || String(value).trim() === "") return null;
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < 1) {
-    throw new Error(`Invalid TARGET_DAYS_AHEAD: ${value}`);
-  }
-  return number;
 }
 
 async function hasText(page, pattern) {
@@ -1208,12 +1092,24 @@ function env(name, defaultValue = "") {
   return process.env[name] ?? defaultValue;
 }
 
-function two(value) {
-  return String(value).padStart(2, "0");
-}
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// locator.isVisible() reports the instantaneous DOM state with no waiting,
+// unlike click(), which auto-waits for an element to become actionable.
+// Right after a navigation or an inline AJAX update, a real element can
+// legitimately read as "not visible yet" for a brief moment - confirmed from
+// two separate real failures (a player-count radio, and a partner search
+// result) where the correct element was demonstrably on the page but every
+// isVisible() check against it returned false. Every place in this file that
+// needs to know whether something IS or IS ABOUT TO BECOME visible should
+// use this instead of a bare isVisible() check.
+async function waitVisible(locator, timeoutMs = 1000) {
+  return locator
+    .waitFor({ state: "visible", timeout: timeoutMs })
+    .then(() => true)
+    .catch(() => false);
 }
 
 // Millisecond-precision timestamp for the handful of log lines in the
