@@ -1,0 +1,172 @@
+name: Book Wrexham Thursday 08:00 tee
+
+on:
+  schedule:
+    # GitHub schedules use UTC and are NOT guaranteed to fire on time - a
+    # scheduled run on 2026-07-12 fired at 21:10 BST instead of 18:00 BST,
+    # over 3 hours late, causing both preferred tee times to be taken
+    # before the bot even logged in. Triggering much earlier (13:00 UTC /
+    # 14:00 BST) gives a large buffer: even a multi-hour GitHub delay
+    # should still land well before the 18:59 BST login target. The
+    # script's own internal clock-wait (WAIT_FOR_LOGIN/WAIT_FOR_1900)
+    # handles the precise timing once the job is actually running.
+    #
+    # A single cron still failed: 15 Nov fired at 19:16, 22 Nov never fired
+    # by 19:06. So there are now several triggers, at odd minutes (on-the-hour
+    # crons are the most delayed). Earliest is 13:41 UTC so the in-job wait
+    # stays under the 340-minute limit. Only one run books: concurrency queues
+    # the rest, and the "already attempted" marker below makes them skip.
+    - cron: "41 13 * * 4"
+    - cron: "37 14 * * 4"
+    - cron: "23 15 * * 4"
+    - cron: "11 16 * * 4"
+    - cron: "53 16 * * 4"
+    - cron: "29 17 * * 4"
+    - cron: "52 17 * * 4"
+    - cron: "17 18 * * 4"
+    - cron: "38 18 * * 4"
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "Optional target date, YYYY-MM-DD. Blank means the Thursday 7 days ahead."
+        required: false
+        type: string
+      dry_run:
+        description: "Run without submitting the final booking"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wrexham-thursday-0800-tee-booking
+  # An in-progress run (e.g. the live Sunday scheduled booking attempt) must
+  # never be killed by a later manual/test trigger - queue instead of cancel.
+  cancel-in-progress: false
+
+jobs:
+  book:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      TZ: Europe/London
+      BOOKING_URL: https://www.wrexhamgolfclub.co.uk/memberbooking/
+      LOGIN_URL: https://www.wrexhamgolfclub.co.uk/login.php
+      PRIMARY_TEE_TIME: "08:00"
+      SECONDARY_TEE_TIME: ""
+      PLAYER_NAMES: "Verrol Skerritt"
+      COURSE_ID: "779"
+      GROUP_ID: "1"
+      REQUIRE_BOOKING_WINDOW: "false"
+      BOOKING_WEEKDAYS: "Thu"
+      TARGET_DAYS_AHEAD: "7"
+      WAIT_FOR_LOGIN: "true"
+      LOGIN_AT: "18:59"
+      WAIT_FOR_1900: "true"
+      TARGET_DATE: ${{ github.event.inputs.target_date || '' }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      IG_MEMBER_ID: ${{ secrets.IG_MEMBER_ID }}
+      IG_PIN: ${{ secrets.IG_PIN }}
+
+    steps:
+      - name: Decide whether this scheduled run should book
+        id: gate
+        shell: bash
+        run: |
+          echo "today=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          now=$(date +%H%M)
+          echo "London time now: $now (event: ${{ github.event_name }})"
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$now" -gt 1930 ]; then
+            echo "Scheduled run started after 19:30 London - too late, skipping so it cannot surprise-book."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check if today's booking was already attempted
+        id: marker
+        if: github.event_name == 'schedule' && steps.gate.outputs.skip != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .booking-attempted
+          key: thursday-booking-attempted-${{ steps.gate.outputs.today }}
+          lookup-only: true
+
+      - name: Stop if another run already handled today
+        id: go
+        shell: bash
+        run: |
+          if [ "${{ steps.gate.outputs.skip }}" = "true" ] || [ "${{ steps.marker.outputs.cache-hit }}" = "true" ]; then
+            echo "Nothing to do for this run."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out repository
+        if: steps.go.outputs.run == 'true'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        if: steps.go.outputs.run == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Show runtime versions
+        if: steps.go.outputs.run == 'true'
+        shell: bash
+        run: |
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        if: steps.go.outputs.run == 'true'
+        shell: bash
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        if: steps.go.outputs.run == 'true'
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install Chromium
+        if: steps.go.outputs.run == 'true'
+        shell: bash
+        run: npx playwright install --with-deps chromium
+
+      - name: Mark today's booking as attempted (stops queued duplicate runs)
+        if: steps.go.outputs.run == 'true' && github.event_name == 'schedule'
+        shell: bash
+        run: echo "attempted ${{ github.run_id }}" > .booking-attempted
+
+      - name: Save attempted marker
+        if: steps.go.outputs.run == 'true' && github.event_name == 'schedule'
+        uses: actions/cache/save@v4
+        with:
+          path: .booking-attempted
+          key: thursday-booking-attempted-${{ steps.gate.outputs.today }}
+
+      - name: Book tee
+        if: steps.go.outputs.run == 'true'
+        shell: bash
+        run: npm run book
+
+      - name: Upload run artifacts
+        if: always() && steps.go.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: booking-run-artifacts
+          path: artifacts/
+          if-no-files-found: ignore

@@ -1,0 +1,26 @@
+name: Keep booking workflows enabled
+
+# GitHub disables scheduled workflows after 60 days without repo activity
+# (this silently stopped the Tuesday/Thursday bookings in late Sept 2026).
+# This re-enables every workflow weekly via the API, which resets that timer.
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Re-enable all workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          for id in $(gh api "repos/${{ github.repository }}/actions/workflows" --jq '.workflows[].id'); do
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$id/enable" && echo "enabled $id"
+          done
