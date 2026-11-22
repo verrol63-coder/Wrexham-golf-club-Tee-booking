@@ -131,6 +131,8 @@ async function main() {
 
     // DIAGNOSTIC: capture what the tee sheet grid actually looks like before release.
     await captureGridDiagnostics(page, "grid-before-release");
+    const bookLinksBeforeRelease = await page.locator('a.inlineBooking[href*="book="]').count().catch(() => 0);
+    console.log(`[${ts()}] Book links on grid before release: ${bookLinksBeforeRelease}.`);
 
     let pageIsOnGrid = true;
 
@@ -146,6 +148,11 @@ async function main() {
         await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
         await dismissCookieBanner(page);
       }
+      // The site does not always show the new "Book" links at exactly 19:00:00
+      // (server clock / cache lag). Previously one reload at 19:00:00 found no
+      // links, every slot was judged "taken", and the run gave up by 19:00:17
+      // (1 Nov and 8 Nov failures). Keep reloading until the release is visible.
+      await waitForRelease(page, gridUrl, bookLinksBeforeRelease);
       // Best-effort only - fire without awaiting so a slow screenshot can never
       // cost us time in the window that matters most.
       captureGridDiagnostics(page, "grid-after-release").catch(() => {});
@@ -905,6 +912,44 @@ async function dismissCookieBanner(page) {
       return;
     }
   }
+}
+
+// Reload the grid until the 19:00 release is actually visible: the primary or
+// secondary time's Book link appears, or the number of Book links changes from
+// the pre-release count. Gives up after RELEASE_POLL_SECONDS (default 180) and
+// lets the normal attempt/fallback logic run anyway.
+async function waitForRelease(page, gridUrl, linksBeforeRelease) {
+  const maxMs = Number(env("RELEASE_POLL_SECONDS", "180")) * 1000;
+  const start = Date.now();
+  const allLinks = page.locator('a.inlineBooking[href*="book="]');
+  const wanted = candidateTimes.map((time) => page.locator(`a.inlineBooking[href*="book=${time}:00"]`).first());
+  let attempt = 0;
+
+  while (Date.now() - start < maxMs) {
+    attempt += 1;
+    for (const link of wanted) {
+      if (await waitVisible(link, attempt === 1 ? 3000 : 500)) {
+        console.log(`[${ts()}] Release visible (preferred time bookable) after ${attempt} check(s).`);
+        return true;
+      }
+    }
+    const count = await allLinks.count().catch(() => 0);
+    if (count > 0 && count !== linksBeforeRelease) {
+      console.log(`[${ts()}] Release visible (${count} Book links, was ${linksBeforeRelease}) after ${attempt} check(s).`);
+      return true;
+    }
+    console.log(`[${ts()}] Release not visible yet (check ${attempt}, ${count} Book links). Reloading grid.`);
+    await sleep(1500);
+    await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+    await dismissCookieBanner(page);
+    if (await acceptCodeOfConductIfPresent(page)) {
+      await page.goto(gridUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+      await dismissCookieBanner(page);
+    }
+  }
+
+  console.log(`[${ts()}] Release still not visible after ${Math.round(maxMs / 1000)}s; trying slots anyway.`);
+  return false;
 }
 
 async function waitUntilLocalClock(hhmm, label) {
