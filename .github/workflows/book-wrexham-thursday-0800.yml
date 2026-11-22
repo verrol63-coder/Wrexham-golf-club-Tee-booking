@@ -12,15 +12,21 @@ on:
     # handles the precise timing once the job is actually running.
     #
     # A single cron still failed: 15 Nov fired at 19:16, 22 Nov never fired
-    # by 19:06. So there are now several triggers, at odd minutes (on-the-hour
+    # by 19:06. So there are now 15 triggers, at odd minutes (on-the-hour
     # crons are the most delayed). Earliest is 13:41 UTC so the in-job wait
     # stays under the 340-minute limit. Only one run books: concurrency queues
     # the rest, and the "already attempted" marker below makes them skip.
     - cron: "41 13 * * 4"
-    - cron: "37 14 * * 4"
-    - cron: "23 15 * * 4"
+    - cron: "03 14 * * 4"
+    - cron: "23 14 * * 4"
+    - cron: "47 14 * * 4"
+    - cron: "07 15 * * 4"
+    - cron: "29 15 * * 4"
+    - cron: "49 15 * * 4"
     - cron: "11 16 * * 4"
+    - cron: "31 16 * * 4"
     - cron: "53 16 * * 4"
+    - cron: "13 17 * * 4"
     - cron: "29 17 * * 4"
     - cron: "52 17 * * 4"
     - cron: "17 18 * * 4"
