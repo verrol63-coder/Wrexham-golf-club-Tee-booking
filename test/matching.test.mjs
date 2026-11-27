@@ -92,6 +92,17 @@ test("classifyPartnerCandidate all-parts mode matches regardless of word order",
   assert.equal(classifyPartnerCandidate("Roberts, Richard", "Richard Roberts", "all-parts").isMatch, true);
 });
 
+test("classifyPartnerCandidate does not match a different member whose name merely contains the target's words as substrings", () => {
+  // "Deanna Holmesworth" contains "dean" (inside "deanna") and "holmes"
+  // (inside "holmesworth") as plain substrings, but is a different person
+  // from "Dean Holmes" - the matcher must require whole-word matches, not
+  // substring matches, or it will select the wrong golf partner.
+  const matchingName = classifyPartnerCandidate("Deanna Holmesworth (12.0)", "Dean Holmes", "matching-name");
+  assert.equal(matchingName.isMatch, false);
+  const allParts = classifyPartnerCandidate("Holmesworth, Deanna", "Dean Holmes", "all-parts");
+  assert.equal(allParts.isMatch, false);
+});
+
 test("normalizeHumanText collapses whitespace and strips punctuation while keeping digits", () => {
   assert.equal(normalizeHumanText("\n    Richard Roberts (17.8) \n    "), "richard roberts 17 8");
   assert.equal(normalizeHumanText("  Multiple   Spaces  "), "multiple spaces");
@@ -136,6 +147,10 @@ test("playerNameLooksPresent matches regardless of word order or extra text", ()
   assert.equal(playerNameLooksPresent("Player 2 Richard Roberts", "Richard Roberts"), true);
   assert.equal(playerNameLooksPresent("Player 2 Roberts, Richard", "Richard Roberts"), true);
   assert.equal(playerNameLooksPresent("Player 2 Enter Details", "Richard Roberts"), false);
+});
+
+test("playerNameLooksPresent does not match a different person whose name merely contains the target's words as substrings", () => {
+  assert.equal(playerNameLooksPresent("Player 3 Deanna Holmesworth", "Dean Holmes"), false);
 });
 
 test("allPartnerNamesPresent / isPartnerDetailsComplete require every partner, not the member", () => {

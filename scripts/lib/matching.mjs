@@ -37,13 +37,21 @@ export function isProvisionalBookingText(text) {
   );
 }
 
+// Whole-word containment, not substring containment: "dean" must appear as
+// its own token in text, not merely inside a longer word like "deanna". Both
+// text and word are expected to already be normalizeHumanText() output
+// (lowercase, space-separated alnum tokens).
+function hasWord(text, word) {
+  return text.split(" ").includes(word);
+}
+
 export function playerNameLooksPresent(text, name) {
   const normalizedText = normalizeHumanText(text);
   const normalizedName = normalizeHumanText(name);
   if (normalizedText.includes(normalizedName)) return true;
 
   const parts = normalizedName.split(" ").filter(Boolean);
-  return parts.length > 1 && parts.every((part) => normalizedText.includes(part));
+  return parts.length > 1 && parts.every((part) => hasWord(normalizedText, part));
 }
 
 export function allPartnerNamesPresent(text, players) {
@@ -78,7 +86,7 @@ export function classifyPartnerCandidate(rawCandidateText, partnerName, mode) {
   if (mode === "matching-name" && (text === target || text.startsWith(`${target} `))) {
     return { isMatch: true, isInitialCandidate: false };
   }
-  if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) {
+  if (mode === "matching-name" && targetParts.length > 1 && targetParts.every((part) => hasWord(text, part))) {
     return { isMatch: true, isInitialCandidate: false };
   }
 
@@ -90,7 +98,7 @@ export function classifyPartnerCandidate(rawCandidateText, partnerName, mode) {
     isInitialCandidate = surnameIndex !== -1 && hasInitial;
   }
 
-  if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => text.includes(part))) {
+  if (mode === "all-parts" && targetParts.length > 1 && targetParts.every((part) => hasWord(text, part))) {
     return { isMatch: true, isInitialCandidate: false };
   }
 
