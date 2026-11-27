@@ -625,12 +625,6 @@ async function findEnterDetailsLink(page, playerNumber) {
 async function fillPartnerDetailPage(page, partnerName, playerNumber) {
   await openAnotherMemberPicker(page);
 
-  const input = await findPartnerInput(page);
-  if (!input) {
-    await savePageDiagnostics(page, `player-${playerNumber}-no-input`).catch(() => {});
-    throw new Error(`Could not find a visible name/member search input for Player ${playerNumber}.`);
-  }
-
   const searchTerm = partnerSearchTerm(partnerName);
 
   // Retrying the search itself is safe even though the tee time and this
@@ -643,6 +637,23 @@ async function fillPartnerDetailPage(page, partnerName, playerNumber) {
     if (attempt > 1) {
       console.log(`Retrying partner search for Player ${playerNumber} (attempt ${attempt}).`);
     }
+
+    // Re-find the input fresh on every attempt, rather than once before the
+    // loop. selectPartnerSuggestion's search-button fallback (below) can
+    // trigger a real page navigation when the live filter finds nothing; a
+    // locator captured before that navigation can resolve to a different -
+    // or missing - element afterward, which would make this "retry" silently
+    // act on the wrong control instead of actually retrying the search.
+    const input = await findPartnerInput(page);
+    if (!input) {
+      if (attempt === 1) {
+        await savePageDiagnostics(page, `player-${playerNumber}-no-input`).catch(() => {});
+        throw new Error(`Could not find a visible name/member search input for Player ${playerNumber}.`);
+      }
+      console.log(`Partner search input not found on retry for Player ${playerNumber}; giving up on this attempt.`);
+      break;
+    }
+
     console.log(`Searching partner surname prefix for Player ${playerNumber}: ${searchTerm}.`);
     // The site's partner search box (class "keypartner") filters its member
     // list live as real keystrokes are typed. Playwright's fill() sets the
