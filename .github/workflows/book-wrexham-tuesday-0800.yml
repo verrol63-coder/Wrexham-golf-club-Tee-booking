@@ -152,6 +152,18 @@ jobs:
         shell: bash
         run: npx playwright install --with-deps chromium
 
+      - name: Book tee
+        if: steps.go.outputs.run == 'true'
+        shell: bash
+        run: npm run book
+
+      # Marked only once the booking actually succeeds (default step condition
+      # requires the job to still be in success status) - NOT before "Book tee"
+      # runs. Marking it early let a single bad run (any bug or transient site
+      # error, not just "no slots left") silently cancel all 14 other backup
+      # triggers for the day, since they'd see the marker and skip without ever
+      # trying. Now a failed attempt leaves the marker unset so the next queued
+      # trigger gets a real chance to retry.
       - name: Mark today's booking as attempted (stops queued duplicate runs)
         if: steps.go.outputs.run == 'true' && github.event_name == 'schedule'
         shell: bash
@@ -163,11 +175,6 @@ jobs:
         with:
           path: .booking-attempted
           key: tuesday-booking-attempted-${{ steps.gate.outputs.today }}
-
-      - name: Book tee
-        if: steps.go.outputs.run == 'true'
-        shell: bash
-        run: npm run book
 
       - name: Upload run artifacts
         if: always() && steps.go.outputs.run == 'true'

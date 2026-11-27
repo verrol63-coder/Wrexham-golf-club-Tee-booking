@@ -502,11 +502,21 @@ async function setPlayerCount(page, count) {
   const radio = page.locator(`input[name="numslots"][value="${count}"]:visible`).first();
   const isPresent = await waitVisible(radio, 3000);
   if (!isPresent) {
-    console.log(`Could not find a visible numslots radio for ${count} players.`);
-    return;
+    // This used to just log and continue, which let fillBookingForm carry on
+    // to submit with whatever player count the form defaulted to. That is
+    // exactly what caused a real incomplete single-player booking: the radio
+    // check silently failed, the form still submitted, and the site took the
+    // booking anyway with the wrong headcount. Abort this slot instead - the
+    // caller's per-slot try/catch moves on to the next candidate/fallback
+    // time, which is always safer than submitting a booking for the wrong
+    // number of players.
+    throw new Error(`Could not find a visible numslots radio for ${count} players; refusing to submit with the wrong player count.`);
   }
   console.log(`Selecting ${count} players via numslots radio.`);
-  await radio.check().catch(() => {});
+  await radio.check();
+  if (!(await radio.isChecked().catch(() => false))) {
+    throw new Error(`Clicked the numslots radio for ${count} players, but it did not end up checked; refusing to submit with the wrong player count.`);
+  }
 }
 
 async function fillPlayerNames(page, players) {
@@ -807,22 +817,6 @@ async function findPartnerResult(page, partnerName, mode) {
   // immediately if it's already visible, so this costs nothing in the
   // common case.
   return (await waitVisible(candidate, 3000)) ? candidate : null;
-}
-
-async function clickPartnerDetailSubmit(page, playerNumber) {
-  const submitButton = await findActionButton(
-    page,
-    [/save/i, /update/i, /add/i, /confirm/i, /continue/i, /submit/i, /done/i],
-    /cancel|remove|delete|back|logout|login|home|news|information|competition|diary|cookie/i
-  );
-
-  if (!submitButton) {
-    await savePageDiagnostics(page, `player-${playerNumber}-no-submit`).catch(() => {});
-    throw new Error(`Could not find a safe submit/save button for Player ${playerNumber}.`);
-  }
-
-  console.log(`Saving details for Player ${playerNumber}.`);
-  await submitButton.click();
 }
 
 async function returnToProvisionalBookingIfNeeded(page) {
